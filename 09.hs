@@ -34,10 +34,7 @@ import Data.Time.Clock
 import Debug.Trace
 import Safe
 import System.Environment
-import qualified Text.Megaparsec as P
-import qualified Text.Megaparsec.Char as P
 import Text.Printf
--- import Text.Scanf
 import Text.Show.Pretty
 
 pp :: Show a => a -> IO ()
