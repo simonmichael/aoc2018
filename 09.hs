@@ -13,6 +13,7 @@
 -- relude 
 -- {-# Language NoImplicitPrelude #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
@@ -22,12 +23,14 @@ import Control.Monad.State
 import Debug.Trace
 import Data.Char
 import Data.Either
+import Data.Foldable
 import Data.Function
 import Data.List
 import Data.List.Split
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
+import qualified Data.Sequence as S
 import Data.String.Here
 import Data.Time.Calendar
 import Data.Time.Clock
@@ -151,28 +154,34 @@ parse :: String -> (Int,Int,Int)
 parse = (\[a,b,c] -> (read a,read b,read c)) . words . map (\c->if isDigit c then c else ' ')
 
 type M = Int  -- marble, 0..
-type C = ([Int],Int,M)  -- circle, current index, next marble to place
+data C = C {
+   cmarbles    :: !(S.Seq Int)
+  ,cindex      :: !Int
+  ,cnextmarble :: !M
+  }
 type Player = Int
 type Score = Int
-type G = (C,M.Map Player Score)  -- game: circle, and each player's score so far
+type G = (C, M.Map Player Score)  -- game: circle, and each player's score so far
 
 -- initial circle
 empty :: C
-empty = ([0],0,1)
+empty = C (S.fromList [0]) 0 1
 
 -- move current index clockwise by one place,
 -- assuming the circle is enlarged by one because we are about to add.
 movec :: C -> C
-movec ([],i,n) = ([], i,n)
-movec (ms,i,n) = (ms, ((i `mod` l) + 1) `mod` (l + 1), n)
-  where l = length ms
+movec c@C{..}
+  | S.null cmarbles = c
+  | otherwise = c{cindex=((cindex `mod` l) + 1) `mod` (l + 1)}
+  where
+    l = length cmarbles
 
 -- move current index anticlockwise by one place.
 movea :: C -> C
-movea ([],i,n) = ([], i, n)
-movea (ms,0,n) = (ms, l, n)
-  where l = length ms - 1
-movea (ms,i,n) = (ms, (i - 1), n)
+movea c@C{..}
+  | S.null cmarbles = c
+  | cindex==0 = c{cindex = length cmarbles - 1}
+  | otherwise = c{cindex = cindex - 1}
 
 -- move current index N places clockwise (N>0) or anticlockwise (N<0).
 move :: Int -> C -> C
@@ -180,14 +189,7 @@ move n = iterateN (abs n) (if n>=0 then movec else movea)
 
 -- insert the next marble at the circle's current index
 add :: C -> C
-add (ms,i,n) =
-  let
-    (as,bs) = splitAt i ms
-    l = as++[n]++bs
-    -- !() = forceAllElementsWHNF l
-    -- !() = forceSpine l
-  in
-    (l, i, n)
+add c@C{..} = c{cmarbles = S.insertAt cindex cnextmarble cmarbles}
 
 forceSpine :: [a] -> ()
 forceSpine = foldr (const id) ()
@@ -198,27 +200,25 @@ forceAllElementsWHNF = foldr seq ()
 
 -- remove the marble at the circle's current index, and also return it
 remove :: C -> (C,M)
-remove (ms,i,n) =
-  let
-    (as,bs) = splitAt i ms
-  in
-    ((as++drop 1 bs,i,n), head bs)
+remove c@C{..} =
+  ( c{cmarbles = S.deleteAt cindex cmarbles}, fromJust $ S.lookup cindex cmarbles )
 
 -- increment the circle's next marble number
-next (ms,i,n) = (ms,i,n+1)
+next :: C -> C
+next c@C{..} = c{cnextmarble = cnextmarble + 1}
 
 -- add the circle's next marble, and also return any score from this move.
-place :: C -> (C,Int)
-place c@(ms,i,n) =
-  if n `mod` 23 /= 0
-  then
-    (next $ add $ move 2 c, 0)
-  else
-    let
-      (c',r) = remove $ move (-7) c
-    in
-      (next $ c', n+r)
+place :: C -> (C, Int)
+place c@C{..}
+  | cnextmarble `mod` 23 /= 0 =
+      (next $ add $ move 2 c, 0)
+  | otherwise =
+      let
+        (c',r) = remove $ move (-7) c
+      in
+        (next $ c', cnextmarble + r)
 
+initGame :: Int -> G
 initGame players = (empty, M.fromList (zip [1..players] (repeat 0)))
 
 -- which player plays the given turn, both 1-based.
@@ -229,10 +229,10 @@ turnPlayer numplayers turn =
 
 -- perform the next player's move, incrementing their score if applicable.
 doTurn :: Int -> G -> G
-doTurn verbosity (c@(ms,i,n),ps) =
+doTurn verbosity (c@C{..}, ps) =
   let
     numplayers = M.size ps
-    turn = n
+    turn = cnextmarble
     player = turnPlayer numplayers turn
     (c',s) = place c
     ps' | s==0 = ps
@@ -246,20 +246,20 @@ doTurn verbosity (c@(ms,i,n),ps) =
 
 -- print a one-line summary of current state
 traceGame :: G -> G
-traceGame g@(c@(ms,i,n),ps) = flip trace g $
+traceGame g@(c@C{..}, ps) = flip trace g $
   concat $ concat [
      [printf "turn %4d %3s" turn (printf "P%d" player :: String)]
     ,showScores ps
     ,["   ["]
-    ,map (printf "%4s" . showm) $ zip [0..] ms
+    ,map (printf "%4s" . showm) $ zip [0..] $ toList cmarbles
     ,["]"]
     ]
   where
     numplayers = M.size ps
-    turn = n-1
+    turn = cnextmarble - 1
     player = turnPlayer numplayers turn
-    showm (mi,m) | mi==i = "("++show m++")"
-                 | otherwise = " "++show m++" "
+    showm (mi,m) | mi==cindex = "("++show m++")"
+                 | otherwise  = " "++show m++" "
 
 showScores :: M.Map Player Score -> [String]
 showScores = map (printf "%7d") . M.elems
