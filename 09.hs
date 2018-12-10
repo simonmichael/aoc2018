@@ -188,7 +188,7 @@ add (ms,i,n) =
     (as,bs) = splitAt i ms
     l = as++[n]++bs
     -- !() = forceAllElementsWHNF l
-    !() = forceSpine l
+    -- !() = forceSpine l
   in
     (l, i, n)
 
@@ -270,7 +270,7 @@ showScores = map (printf "%7d") . M.elems
 runGame :: Int -> Int -> Int -> IO ()
 runGame numplayers nummarbles verbosity = do
   t0 <- getCurrentTime
-  let (_,ps) = (iterate (doTurn verbosity) $ initGame numplayers) !! nummarbles
+  let (_,ps) = (iterate' (doTurn verbosity) $ initGame numplayers) !! nummarbles
   t1 <- ps `seq` getCurrentTime
   let mins = fromRational $ toRational $ diffUTCTime t1 t0 :: Double
   printf "after %d players playing %d marbles, high score is %d\n"
