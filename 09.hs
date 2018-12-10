@@ -287,6 +287,10 @@ main = do
         runGame (numplayers) (nummarbles) 0
         -- 386018
 
+input = map parse $ lines [here|
+476 players; last marble is worth 71657 points. score ? (0)
+|]
+
 {-
 
 Amused by the speed of your answer, the Elves are curious:
@@ -297,7 +301,4 @@ marble were 100 times larger?
 -}
 
 -- ./09 476 7165700
-
-input = map parse $ lines [here|
-476 players; last marble is worth 71657 points. score ? (0)
-|]
+-- 3085518618
