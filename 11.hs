@@ -10,19 +10,20 @@
 {-# LANGUAGE TupleSections #-}
 
 -- import Relude
+import Prelude hiding (reverse,length)
 import Control.Monad.State
 import Debug.Trace
 import Data.Bifunctor
 import Data.Char
 import Data.Either
-import Data.Foldable
+import Data.Foldable hiding (length)
 import Data.Function
-import Data.List as L
+import qualified Data.List as L
 import Data.List.Split
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
-import qualified Data.Sequence as S
+import Data.Sequence as S
 import Data.String.Here
 import Data.Time.Calendar
 import Data.Time.Clock
@@ -59,6 +60,12 @@ fourth4 (_,_,_,x) = x
 
 
 
+type X = Int    -- x position
+type Y = Int    -- y position
+type P = Int    -- power level
+type S = Int    -- size of square of cells or square grid
+type G = Seq (Seq P)  -- grid of cell power levels
+
 -- | Calculate power level of the cell at x y given serial number s.
 --
 -- #>>> cellpower 8 3 5
@@ -76,12 +83,12 @@ cellpower :: Int -> X -> Y -> P
 cellpower s x y =
   let rid = x + 10
   in
-    read ([reverse (show ((rid * y + s) * rid)) !! 2]) - 5
+    read ([L.reverse (show ((rid * y + s) * rid)) !! 2]) - 5
 
 -- | Make a grid of n x n cell power levels based on serial number s.
 grid :: Int -> Int -> G
 grid s n =
-  [[cellpower s x y | x <- [1..n]] | y <- [1..n]]
+  fromList [fromList [cellpower s x y | x <- [1..n]] | y <- [1..n]]
 
 g3 = grid 0 3
 g5 = grid 10 5
@@ -92,13 +99,7 @@ g   = grid 1308 300
 
 -- Look up power level of cell at 1-based x,y in grid g.
 cellat :: G -> X -> Y -> P
-cellat g x y = g !! (y-1) !! (x-1)
-
-type X = Int    -- x position
-type Y = Int    -- y position
-type P = Int    -- power level
-type G = [[P]]  -- grid of cell power levels
-type S = Int    -- size of square of cells or square grid
+cellat g x y = g `index` (y-1) `index` (x-1)
 
 -- | Find power level of the 3 x 3 cells whose top left is x y in grid g.
 --
@@ -124,7 +125,7 @@ power3 g tlx tly =
 locate3 :: G -> (X,Y)
 locate3 g =
   let
-    maxx = length (head g) - 2
+    maxx = length (g `index` 0) - 2
     maxy = length g - 2
   in
     snd $ maximumBy (comparing fst) $
@@ -149,7 +150,7 @@ powern g n tlx tly =
 locaten :: G -> S -> (P,(X,Y))
 locaten g n =
   let
-    maxx = length (head g) - (n-1)
+    maxx = length (g `index` 0) - (n-1)
     maxy = length g - (n-1)
   in
     maximumBy (comparing fst) $
