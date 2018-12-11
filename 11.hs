@@ -23,10 +23,11 @@ import Data.List.Split
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
-import Data.Sequence as S
+import qualified Data.Sequence as S
 import Data.String.Here
 import Data.Time.Calendar
 import Data.Time.Clock
+import Data.Vector as V hiding ((++),sum,concat,maximumBy)
 import Debug.Trace
 import System.Console.ANSI
 import System.Environment
@@ -64,7 +65,9 @@ type X = Int    -- x position
 type Y = Int    -- y position
 type P = Int    -- power level
 type S = Int    -- size of square of cells or square grid
-type G = Seq (Seq P)  -- grid of cell power levels
+-- type G = [[P]]  -- grid of cell power levels
+-- type G = Seq (Seq P)  -- grid of cell power levels
+type G = Vector (Vector P)
 
 -- | Calculate power level of the cell at x y given serial number s.
 --
@@ -99,7 +102,7 @@ g   = grid 1308 300
 
 -- Look up power level of cell at 1-based x,y in grid g.
 cellat :: G -> X -> Y -> P
-cellat g x y = g `index` (y-1) `index` (x-1)
+cellat g x y = g ! (y-1) ! (x-1)
 
 -- | Find power level of the 3 x 3 cells whose top left is x y in grid g.
 --
@@ -125,7 +128,7 @@ power3 g tlx tly =
 locate3 :: G -> (X,Y)
 locate3 g =
   let
-    maxx = length (g `index` 0) - 2
+    maxx = length (g ! 0) - 2
     maxy = length g - 2
   in
     snd $ maximumBy (comparing fst) $
@@ -150,13 +153,13 @@ powern g n tlx tly =
 locaten :: G -> S -> (P,(X,Y))
 locaten g n =
   let
-    maxx = length (g `index` 0) - (n-1)
+    maxx = length (g ! 0) - (n-1)
     maxy = length g - (n-1)
   in
     maximumBy (comparing fst) $
     concat [[(powern g n x y,(x,y)) | x <- [1..maxx]] | y <- [1..maxy]]
 
--- | Find top left coordinate and size of the cell square with highest power level in grid g.
+-- | Find power, top left coordinate and size of the cell square with highest power level in grid g.
 --
 -- #>>> locate g3
 -- ((0,(3,3)),1)
@@ -168,8 +171,8 @@ locate g =
   let
     maxn = length g
   in
-    maximumBy (comparing (fst.fst)) $ [(locaten g (ltrace "comparing" n), n) | n <- [1..maxn]]
+    maximumBy (comparing (fst.fst)) $ [(locaten g (ltrace "size" n), n) | n <- [1..maxn]]
 
 main = do
-  pp $ locate3 g -- 21,41
+  -- pp $ locate3 g -- 21,41
   pp $ locate g
