@@ -27,7 +27,7 @@ import qualified Data.Sequence as S
 import Data.String.Here
 import Data.Time.Calendar
 import Data.Time.Clock
-import Data.Vector as V hiding ((++),sum,concat,maximumBy)
+import Data.Vector as V hiding ((++),concat,maximumBy)
 import Debug.Trace
 import System.Console.ANSI
 import System.Environment
@@ -65,9 +65,9 @@ type X = Int    -- x position
 type Y = Int    -- y position
 type P = Int    -- power level
 type S = Int    -- size of square of cells or square grid
--- type G = [[P]]  -- grid of cell power levels
--- type G = Seq (Seq P)  -- grid of cell power levels
-type G = Vector (Vector P)
+-- type G = [[P]]
+-- type G = Seq (Seq P)
+type G = Vector (Vector P)  -- grid of cell power levels
 
 -- | Calculate power level of the cell at x y given serial number s.
 --
@@ -104,6 +104,10 @@ g   = grid 1308 300
 cellat :: G -> X -> Y -> P
 cellat g x y = g ! (y-1) ! (x-1)
 
+-- Get the s-sized square-sub-grid of cells whose top left is x,y from g.
+cellsquareat :: G -> S -> X -> Y -> G
+cellsquareat g s x y = V.map (slice (x-1) s) $ slice (y-1) s g
+
 -- | Find power level of the 3 x 3 cells whose top left is x y in grid g.
 --
 -- #>>> let g = g18 in uncurry (power3 g) (locate3 g)
@@ -113,7 +117,7 @@ cellat g x y = g ! (y-1) ! (x-1)
 -- 30
 power3 :: G -> X -> Y -> P
 power3 g tlx tly =
-  sum $ concat [[cellat g x y | x <- [tlx..tlx+2]] | y <- [tly..tly+2]]
+  L.sum $ concat [[cellat g x y | x <- [tlx..tlx+2]] | y <- [tly..tly+2]]
 
 -- | Find top left coordinate of the 3 x 3 cells with highest power level in grid g.
 --
@@ -143,7 +147,8 @@ locate3 g =
 -- 30
 powern :: G -> S -> X -> Y -> P
 powern g n tlx tly =
-  sum $ concat [[cellat g x y | x <- [tlx..tlx+(n-1)]] | y <- [tly..tly+(n-1)]]
+  -- sum $ concat [[cellat g x y | x <- [tlx..tlx+(n-1)]] | y <- [tly..tly+(n-1)]]
+  V.sum $ V.map V.sum $ cellsquareat g n tlx tly
 
 -- | Find power and top left coordinate of the n x n cells with highest power level in grid g.
 --
