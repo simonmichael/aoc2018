@@ -179,5 +179,5 @@ locate g =
     maximumBy (comparing (fst.fst)) $ [(locaten g (ltrace "size" n), n) | n <- [1..maxn]]
 
 main = do
-  -- pp $ locate3 g -- 21,41
-  pp $ locate g
+  pp $ locate3 g -- 21,41
+  pp $ locate g -- ( ( 103 , ( 227 , 199 ) ) , 19 )
