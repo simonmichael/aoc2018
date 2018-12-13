@@ -284,7 +284,7 @@ shrinkRegion (x,ps) = (x',ps')
 
 -- run for n generations, printing each generation or other progress info depending on verbosity level,
 -- and returning the last generation's live plants score.
-run :: HasCallStack => String -> Int -> Verbosity -> IO Score  -- left-side length, right-side length including 0, initial state and rules input, number of generations to run
+run :: HasCallStack => String -> Int -> Verbosity -> IO Score  -- initial state and rules input, number of generations to run, verbosity level
 run input n verbosity = do
   let (g0,rules) = parse input
   when (verbosity>=2) $ putStrLn $ showGeneration g0
