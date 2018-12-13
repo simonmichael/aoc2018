@@ -261,7 +261,7 @@ nextgen verbosity rules maxn (i, oldregion@(x,ps)) =
     do
       when (verbosity>=2) $ putStrLn $ showGeneration g'
       when (verbosity==1 && i `mod` 1000 == 0) $ putStrLn $ showGeneration g'
-      if True -- ps /= newps
+      if ps /= newps
       then return g'
       else do
         let
