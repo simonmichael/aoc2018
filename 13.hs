@@ -477,24 +477,26 @@ resetterm = do
   setSGR [Reset]
   showCursor
 
+displaycommands = [
+   ("printnothing"    ,printnothing)
+  ,("printcarts"      ,printcarts)
+  ,("printcartbounds" ,printcartbounds)
+  ,("printworld"      ,printworld)
+  ,("displaycarts",    displayWorldAnsi False 0.001)
+  ,("displayworld",    displayWorldAnsi True  0.05)
+  ]
+
+usage = "Usage: ./13 INPUTFILE " ++ intercalate "|" (map fst displaycommands)
 
 main = do
-  let usage = "Usage: ./13 INPUTFILE printnothing|printcarts|printcartbounds|printworld|displaycarts|displayworld"
+  
   args <- getArgs
   when (null args) $ putStrLn usage >> exitSuccess
   let
     [f,displaytype] = take 2 $ args ++ drop (length args) ["13.in","printnothing"]
     -- w4 = parse t4
     displayfn =
-      fromMaybe (error $ "bad display type. "++usage) $
-      lookup displaytype [
-         ("printnothing"    ,printnothing)
-        ,("printcarts"      ,printcarts)
-        ,("printcartbounds" ,printcartbounds)
-        ,("printworld"      ,printworld)
-        ,("displaycarts",    displayWorldAnsi False 0.001)
-        ,("displayworld",    displayWorldAnsi True  0.05)
-        ]
+      fromMaybe (error $ "bad display type. "++usage) $ lookup displaytype displaycommands
   
     updateAnd :: (World -> IO ()) -> Bool -> World -> IO World
     updateAnd = \display part2 -> update part2 >=> (\w -> display w $> w)
