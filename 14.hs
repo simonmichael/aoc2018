@@ -75,6 +75,11 @@ forceSpine = foldr (const id) ()
 forceAllElementsWHNF :: [a] -> ()
 forceAllElementsWHNF = foldr seq ()
 
+-- assert that prints to stdout in normal output sequence
+assert_ :: (HasCallStack, MonadIO m) => Bool -> m ()
+assert_ True  = return ()
+assert_ False = liftIO $ putStrLn " assertion failed" >> exitFailure
+
 -- timeIt :: MonadIO m => m a -> m a
 -- Wrap a MonadIO computation so that it prints out the execution time.
 
@@ -89,9 +94,10 @@ forceAllElementsWHNF = foldr seq ()
 
 --
 
-t1 = [here|
-(3)[7]
- |]
+-- t1 = [here|
+-- 37
+--  |]
+-- (3)[7]
 -- (3)[7] 1  0 
 --  3  7  1 [0](1) 0 
 --  3  7  1  0 [1] 0 (1)
@@ -114,48 +120,84 @@ t1 = [here|
 -- After 2018 recipes, the scores of the next ten would be 5941429882.
 
 type T = Int -- simulation time, 0..
-type R = Int -- recipe, 0..9
+type S = Int -- recipe score, 0..9
 data W = W { -- world
-   wtime :: T
-  ,wrecipes :: [R]
-  ,welf1 :: Int
-  ,welf2 :: Int
+   wtime    :: T
+  ,wscores  :: [S]
+  ,welf1    :: S
+  ,welf2    :: S
 } deriving (Show)
 
+parse :: String -> W
 parse s =
-  let
-    rs = chunksOf 3 s
-  in
-    W{wtime    = 0
-     ,wrecipes = map (read.take 1.drop 1) rs
-     ,welf1    = fromJust $ findIndex ("(" `isPrefixOf`) rs
-     ,welf2    = fromJust $ findIndex ("[" `isPrefixOf`) rs
-     }
+  W{wtime   = 0
+   ,wscores = map toscore s
+   ,welf1   = 0
+   ,welf2   = 1
+   }
 
-done n W{..} = wtime == n
+toscore c = ord c - ord '0'
 
-step :: (W -> IO W) -> (W -> IO ()) -> (W -> IO W)
-step = \update display -> update >=> ((<$) <*> display)
+time    n W{..} = wtime == n
+recipes n W{..} = length wscores >= n
 
-assert' = flip assert (pure ())
-
+main :: IO ()
 main = do
-  let w1 = parse t1
 
-  let n = 2
-  w' <- iterateUntilM (done n) (step update1 printnothing) w1
-  pp $ wrecipes w'
-  assert' $ length (wrecipes w') == length (wrecipes w1) + n
+  -- let (usage,defargs) = ("Usage: ./14 [INPUTFILE]", ["14.in"])
+  -- args <- getArgs
+  -- -- when (null args) $ putStrLn usage >> exitSuccess
+  -- -- let [f] = take 1 $ args ++ drop (length args) defargs
+  -- -- input <- parse <$> readFile f
 
-  -- input <- parse <$> read "14.in"
+  ss <- fmap (concatMap show) $ nextScores 9 10 return $ parse "37"
+  putStr ss >> assert_ (ss == "5158916779") >> putStrLn " ok"
 
+  ss <- fmap (concatMap show) $ nextScores 5 10 return $ parse "37"
+  putStr ss >> assert_ (ss == "0124515891") >> putStrLn " ok"
+
+  ss <- fmap (concatMap show) $ nextScores 18 10 return $ parse "37"
+  putStr ss >> assert_ (ss == "9251071085") >> putStrLn " ok"
+
+  ss <- fmap (concatMap show) $ nextScores 2018 10 return $ parse "37"
+  putStr ss >> assert_ (ss == "5941429882") >> putStrLn " ok"
+
+  let input = "633601"
+      wrong = ["9714214618"]
+  ss <- fmap (concatMap show) $ nextScores (length input) 10 printworld $ parse input
+  putStr ss >> assert_ (not $ ss `elem` wrong) >> putStrLn " ok"
+
+-- part 1 world update function
+update1 :: W -> IO W
 update1 w@W{..} = do
-  return w{wtime=wtime+1}
+  let
+    (cur1,cur2) = (wscores!!welf1, wscores!!welf2)
+    wscores' = wscores ++ (map toscore $ show $ sum [cur1,cur2])
+    welf1' = (welf1 + cur1 + 1) `mod` length wscores'
+    welf2' = (welf2 + cur2 + 1) `mod` length wscores'
+  return w{
+     wtime   = wtime+1
+    ,wscores = wscores'
+    ,welf1   = welf1'
+    ,welf2   = welf2'
+    }
 
-printnothing W{..} = pp wtime
+-- | after the first m scores in the given World, get the next n scores
+nextScores :: Int -> Int -> (W -> IO W) -> W -> IO [S]
+nextScores afterm nextn display w = do
+  w' <- iterateUntilM (recipes (afterm + nextn)) (update1 >=> display) <=< display $ w
+  return $ take nextn $ drop afterm $ wscores w'
 
+-- display functions, these return the unmodified World for easier chaining
 
--- | get the next n recipes after the given recipe sequence.
--- nextrecipes :: Int -> [R] -> [R]
--- nextrecipes n = take (length rs + n) $ cycle rs 
+printworld :: W -> IO W
+printworld w@W{..} = do
+  printf "%4d (%4d recipes):  %s\n" wtime (length wscores) (concat $ map fmt $ zip [0..] wscores)
+  return w
+  where
+    fmt (i,d)
+      | i==welf1 && i==welf2 = "("++show d++"]"
+      | i==welf1             = "("++show d++")"
+      | i==welf2             = "["++show d++"]"
+      | otherwise            = " "++show d++" "
 
