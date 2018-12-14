@@ -1,15 +1,18 @@
 #!/usr/bin/env stack
-{- stack --resolver=nightly-2018-11-14 script --compile
-   --package "ansi-terminal containers here megaparsec monad-loops mtl pretty-show safe scanf split time timeit vector"
+{- stack --resolver=nightly-2018-12-12 script --compile
+   --package "ansi-terminal terminal-size containers here megaparsec monad-loops mtl pretty-show safe scanf split time timeit vector"
 -}
 -- relude 
 -- {-# Language NoImplicitPrelude #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
 -- import Relude
+import Control.Concurrent 
+import Control.Exception
 import Control.Monad.Loops
 import Control.Monad.State
 import Debug.Trace
@@ -19,6 +22,7 @@ import Data.Char
 import Data.Either
 import Data.Foldable
 import Data.Function
+import Data.Functor
 import Data.IntMap (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List as L
@@ -43,6 +47,7 @@ import qualified Text.Megaparsec.Char as P
 import Text.Printf
 import qualified Text.Scanf as SC
 import Text.Show.Pretty
+import System.Console.Terminal.Size
 
 pp :: Show a => a -> IO ()
 pp = putStrLn . ppShow
@@ -101,133 +106,139 @@ t2 = [here|
    \-----/
 |]
 
-s1 = [here|
-|  |  |  |  |
-v  |  |  |  |
-|  v  v  |  |
-|  |  |  v  X
-|  |  ^  ^  |
-^  ^  |  |  |
-|  |  |  |  |
-|]
-
+-- |  |  |  |  |
+-- v  |  |  |  |
+-- |  v  v  |  |
+-- |  |  |  v  X
+-- |  |  ^  ^  |
+-- ^  ^  |  |  |
+-- |  |  |  |  |
 t3 = [here|
-/->-\        
-|   |  /----\
-| /-+--+-\  |
-| | |  | v  |
-\-+-/  \-+--/
-  \------/   
+|
+v
+|
+|
+|
+^
+|
 |]
-
-s2 = [here|
-/->-\        
-|   |  /----\
-| /-+--+-\  |
-| | |  | v  |
-\-+-/  \-+--/
-  \------/   
-
-/-->\        
-|   |  /----\
-| /-+--+-\  |
-| | |  | |  |
-\-+-/  \->--/
-  \------/   
-
-/---v        
-|   |  /----\
-| /-+--+-\  |
-| | |  | |  |
-\-+-/  \-+>-/
-  \------/   
-
-/---\        
-|   v  /----\
-| /-+--+-\  |
-| | |  | |  |
-\-+-/  \-+->/
-  \------/   
-
-/---\        
-|   |  /----\
-| /->--+-\  |
-| | |  | |  |
-\-+-/  \-+--^
-  \------/   
-
-/---\        
-|   |  /----\
-| /-+>-+-\  |
-| | |  | |  ^
-\-+-/  \-+--/
-  \------/   
-
-/---\        
-|   |  /----\
-| /-+->+-\  ^
-| | |  | |  |
-\-+-/  \-+--/
-  \------/   
-
-/---\        
-|   |  /----<
-| /-+-->-\  |
-| | |  | |  |
-\-+-/  \-+--/
-  \------/   
-
-/---\        
-|   |  /---<\
-| /-+--+>\  |
-| | |  | |  |
-\-+-/  \-+--/
-  \------/   
-
-/---\        
-|   |  /--<-\
-| /-+--+-v  |
-| | |  | |  |
-\-+-/  \-+--/
-  \------/   
-
-/---\        
-|   |  /-<--\
-| /-+--+-\  |
-| | |  | v  |
-\-+-/  \-+--/
-  \------/   
-
-/---\        
-|   |  /<---\
-| /-+--+-\  |
-| | |  | |  |
-\-+-/  \-<--/
-  \------/   
-
-/---\        
-|   |  v----\
-| /-+--+-\  |
-| | |  | |  |
-\-+-/  \<+--/
-  \------/   
-
-/---\        
-|   |  /----\
-| /-+--v-\  |
-| | |  | |  |
-\-+-/  ^-+--/
-  \------/   
-
-/---\        
-|   |  /----\
-| /-+--+-\  |
-| | |  X |  |
-\-+-/  \-+--/
-  \------/   
-|]  -- 7,3
 
 t4 = [here|
+/->-\        
+|   |  /----\
+| /-+--+-\  |
+| | |  | v  |
+\-+-/  \-+--/
+  \------/   
+|]
+
+t5 = [here|
+/->-\        
+|   |  /----\
+| /-+--+-\  |
+| | |  | v  |
+\-+-/  \-+--/
+  \------/   
+|]
+-- /-->\        
+-- |   |  /----\
+-- | /-+--+-\  |
+-- | | |  | |  |
+-- \-+-/  \->--/
+--   \------/   
+
+-- /---v        
+-- |   |  /----\
+-- | /-+--+-\  |
+-- | | |  | |  |
+-- \-+-/  \-+>-/
+--   \------/   
+
+-- /---\        
+-- |   v  /----\
+-- | /-+--+-\  |
+-- | | |  | |  |
+-- \-+-/  \-+->/
+--   \------/   
+
+-- /---\        
+-- |   |  /----\
+-- | /->--+-\  |
+-- | | |  | |  |
+-- \-+-/  \-+--^
+--   \------/   
+
+-- /---\        
+-- |   |  /----\
+-- | /-+>-+-\  |
+-- | | |  | |  ^
+-- \-+-/  \-+--/
+--   \------/   
+
+-- /---\        
+-- |   |  /----\
+-- | /-+->+-\  ^
+-- | | |  | |  |
+-- \-+-/  \-+--/
+--   \------/   
+
+-- /---\        
+-- |   |  /----<
+-- | /-+-->-\  |
+-- | | |  | |  |
+-- \-+-/  \-+--/
+--   \------/   
+
+-- /---\        
+-- |   |  /---<\
+-- | /-+--+>\  |
+-- | | |  | |  |
+-- \-+-/  \-+--/
+--   \------/   
+
+-- /---\        
+-- |   |  /--<-\
+-- | /-+--+-v  |
+-- | | |  | |  |
+-- \-+-/  \-+--/
+--   \------/   
+
+-- /---\        
+-- |   |  /-<--\
+-- | /-+--+-\  |
+-- | | |  | v  |
+-- \-+-/  \-+--/
+--   \------/   
+
+-- /---\        
+-- |   |  /<---\
+-- | /-+--+-\  |
+-- | | |  | |  |
+-- \-+-/  \-<--/
+--   \------/   
+
+-- /---\        
+-- |   |  v----\
+-- | /-+--+-\  |
+-- | | |  | |  |
+-- \-+-/  \<+--/
+--   \------/   
+
+-- /---\        
+-- |   |  /----\
+-- | /-+--v-\  |
+-- | | |  | |  |
+-- \-+-/  ^-+--/
+--   \------/   
+
+-- /---\        
+-- |   |  /----\
+-- | /-+--+-\  |
+-- | | |  X |  |  -- 7,3
+-- \-+-/  \-+--/
+--   \------/   
+
+t6 = [here|
 />-<\  
 |   |  
 | /<+-\
@@ -243,7 +254,7 @@ type Dir = Char
 carts = "^>v<"
 dirs = carts ++ "X+"  -- X means crash/stop, + means pick the next intersection choice
 type Cart = ((X, Y), Dir, Int)  -- position, heading, number of intersections passed
-type T = Int
+type T = Int  -- ticks since simulation start. When negative, indicates the simulation should stop.
 type Track = [String]
 type World = (Track, T, [Cart])
 
@@ -253,6 +264,10 @@ parse s = (ss', 0, carts)
     ss = lines s
     carts = sortcarts $ concatMap rowcarts $ zip [0..] ss
     ss' = map fillrow ss
+
+isfinished :: World -> Bool
+isfinished (_,t,_) | t < 0 = True
+isfinished _ = False
 
 rowcarts (y,s) = [((x,y), d, 0) | (x,d) <- filter ((`elem` carts).snd) $ zip [0..] s]
 
@@ -266,12 +281,43 @@ fillrow = map fillcell
     fillcell '<' = '-'
     fillcell c   = c
 
-update (track, t, carts) =
+iscrashed :: Cart -> Bool
+iscrashed (_,'X',_) = True
+iscrashed _ = False
+
+update :: Bool -> World -> IO World
+update part2 oldw@(track, t, carts) = do
+  let
+    t' = t+1
+    carts' = foldl' (move part2 track) carts $ sortcarts carts
+    neww = (track, t', carts')
+    endw = (track, -t', carts')
+
   case carts' of
-    [c] -> error ("last cart standing after tick "++show t++": "++show c)  -- part 2
-    _   -> (track, t+1, sortcarts carts')
-  where
-    carts' = foldl' (move track) carts $ sortcarts carts
+
+    cs | not part2 && any iscrashed cs -> do
+      let c = fromJust $ find iscrashed cs
+      printworld neww
+      printf "first crash happens in tick %d: %s\n" t' (show c)
+      return endw
+
+    [c] | part2 -> do
+      printworld neww
+      printf "last cart standing after tick %d: %s\n" t' (show $ first3 c)
+      return endw
+
+    [] | part2 -> do
+      printworld neww
+      printf "no carts left after tick %d\n" t'
+      return endw
+
+    _ | neww == oldw -> do
+      printworld neww
+      printf "track has stabilised after tick %d\n" t'
+      return endw
+
+    _ ->
+      return neww
 
 dirdelta '^' = (0,-1)
 dirdelta 'v' = (0,1)
@@ -282,10 +328,10 @@ dirdelta _   = (0,0)
 peek track (x,y) = track !! y !! x
 
 -- move the given cart, possibly crashing it and other affected carts.
-move :: Track -> [Cart] -> Cart -> [Cart]
-move _     cs    (_,'X',_)        = cs  -- already crashed carts do nothing
-move track carts cart@((x,y),d,i) =
-  filter ((/='X').second3) $  -- part 2
+move :: Bool -> Track -> [Cart] -> Cart -> [Cart]
+move part2 _     cs    (_,'X',_)        = cs  -- already crashed carts do nothing
+move part2 track carts cart@((x,y),d,i) =
+  (if part2 then filter ((/='X').second3) else id) $
   cart' : map (maybecrashothers cart') (carts \\ [cart])
   where
     (dx,dy) = dirdelta d
@@ -294,7 +340,7 @@ move track carts cart@((x,y),d,i) =
     cartsahead  = filter ((==(ax,ay)).first3) carts
     cart' =
       case (cartsahead, lookup (d,trackahead) transitions) of
-        ((_:_), _)      -> ((ax,ay),'X',i) -- & error ("first crash:"++show (ax,ay))
+        ((_:_), _)      -> ((ax,ay),'X',i)
         ([],  Just 'X') -> ((x,y),'X',i)
         ([],  Just '+') -> ((ax,ay),nextintersectiondir i d,i+1)
         ([],  Just c)   -> ((ax,ay),c,i)
@@ -346,6 +392,30 @@ rightturn d = carts !! i'
     i = fromJust (d `elemIndex` carts) + 1
     i' = if i > 3 then 0 else i
 
+printnothing :: World -> IO ()
+printnothing = const $ return ()
+
+printcartbounds :: World -> IO ()
+printcartbounds (_,t,carts) =
+  printf "%d carts, bounding box %s\n" (length carts) boundsstr
+  where
+    ps = map first3 carts
+    xs = map fst ps
+    ys = map snd ps
+    boundsstr | null carts = "(none)"
+              | otherwise  = printf "%d x %d" (maximum xs - minimum xs) (maximum ys - minimum ys)
+
+printcarts :: World -> IO ()
+printcarts (_,t,carts) =
+  printf "%d carts, %s\n" (length carts) (show carts)
+  where
+    ps = map first3 carts
+    xs = map fst ps
+    ys = map snd ps
+    boundsstr | null carts = "(none)"
+              | otherwise  = printf "%d x %d" (maximum xs - minimum xs) (maximum ys - minimum ys)
+
+printworld :: World -> IO ()
 printworld (track,t,carts) =
   printf ("\n%d:\n" ++ unlines (map (drawcarts carts) $ zip [0..] track)) t
   where
@@ -356,18 +426,99 @@ printworld (track,t,carts) =
             (_,d,_):_ -> d
             _         -> c
 
-main = do
-  -- mapM_ printworld $ take 20 $ iterate update $ parse t3
-  -- iterateUntilM ((==n).fst) (nextgen verbosity rules n) g0
+-- display current tick, cart bounds, and as much of the world as will fit,
+-- in ansi terminal, and pause for the given delay.
+displayWorldAnsi :: Bool -> Double -> World -> IO ()
+displayWorldAnsi showtrack delaysecs w@(track,t,carts) = do
+  Just (Window{..}) <- size
+  let
+    maxy = height - 3
+    maxx = width - 3
 
-  input <- readFile "13.in"
+  clearScreen
+  setCursorPosition 0 0
+
+  setSGR [
+     SetColor Foreground Vivid Green
+    ,SetColor Background Dull Black
+    ,SetConsoleIntensity BoldIntensity
+    ,SetSwapForegroundBackground False
+    ]
+  putStr $ "t " ++ show t ++ "  "
+  printcartbounds w
+
+  when showtrack $ do
+    setSGR [
+       SetColor Foreground Dull Red
+      ,SetColor Background Dull Black
+      ,SetConsoleIntensity FaintIntensity
+      ,SetSwapForegroundBackground False
+      ]
+    putStrLn $ unlines $ map (take maxx) $ take maxy track
+
+  setSGR [
+     SetColor Foreground Vivid White
+    ,SetColor Background Dull Black
+    ,SetConsoleIntensity BoldIntensity
+    ,SetSwapForegroundBackground True
+    ]
+  forM_ carts $ \((x,y),d,_) -> do
+    -- when (y < maxy && x < maxx) $ do
+      setCursorPosition (y+1) x
+      putChar d
+
+  threadDelay $ round $ delaysecs * 1e6
+
+initterm = do
+  hSetBuffering stdout NoBuffering
+  hideCursor
+
+resetterm = do
+  setSGR [Reset]
+  showCursor
+
+
+main = do
+  let usage = "Usage: ./13 INPUTFILE printnothing|printcarts|printcartbounds|printworld|displaycarts|displayworld"
+  args <- getArgs
+  when (null args) $ putStrLn usage >> exitSuccess
+  let
+    [f,displaytype] = take 2 $ args ++ drop (length args) ["13.in","printnothing"]
+    -- w4 = parse t4
+    displayfn =
+      fromMaybe (error $ "bad display type. "++usage) $
+      lookup displaytype [
+         ("printnothing"    ,printnothing)
+        ,("printcarts"      ,printcarts)
+        ,("printcartbounds" ,printcartbounds)
+        ,("printworld"      ,printworld)
+        ,("displaycarts",    displayWorldAnsi False 0.001)
+        ,("displayworld",    displayWorldAnsi True  0.05)
+        ]
+  
+    updateAnd :: (World -> IO ()) -> Bool -> World -> IO World
+    updateAnd = \display part2 -> update part2 >=> (\w -> display w $> w)
+    -- updateAnd = \update display -> update >=> ((<$) <*> display)
+
+  w <- parse <$> readFile f
+  
   -- part 1
-  -- mapM_ printworld $ iterate update $ parse input -- 40,90
+  -- iterateUntilM isfinished (updateAnd printnothing False) w
+    -- first crash after tick 145: (40,90)
+
   -- part 2
-  -- mapM_ (pp.length.third3) $ iterate update $ parse t4  -- 6,4
-  mapM_ (pp.length.third3) $ iterate update $ parse input  --
-{- not:
-40,132
-40,133 
-40,134 (?)
--}
+  let bracket = if ("display" `isInfixOf` displaytype)
+                then bracket_ initterm resetterm
+                else id
+  bracket $ iterateUntilM isfinished (updateAnd displayfn True) w
+  
+    -- last cart standing after tick 8131: ((40,133),'^',3059)
+    -- last cart standing after tick 8132: (40,133)
+    -- XXX wrong:
+    -- 40,132
+    -- 40,133 
+    -- 40,134
+    --
+    -- mcpower's input: no carts left after tick 30476
+    -- glguy's        : no carts left after tick 30476  
+    -- dsal's         : no carts left after tick 7671
