@@ -1,6 +1,7 @@
 #!/usr/bin/env stack
 {- stack --resolver=nightly-2018-12-12 script --compile
    --package ansi-terminal
+   --package astar
    --package call-stack
    --package containers
    --package here
@@ -38,6 +39,8 @@ import Data.Either
 import Data.Foldable
 import Data.Function
 import Data.Functor
+import Data.Graph.AStar
+import qualified Data.HashSet  as H
 import Data.IntMap (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List as L
@@ -52,6 +55,7 @@ import Data.Time.Calendar
 import Data.Time.Clock
 import qualified Data.Vector.Unboxed as V
 import Debug.Trace
+import Safe
 import System.Console.ANSI
 import System.Environment
 import System.IO
@@ -365,14 +369,16 @@ data W = W { -- simulation world
 data Tile = Wall | Floor deriving (Eq,Show)
 data U = U {
    utype    :: Type
-  ,upos     :: Pos
   ,uhp      :: HP
+  ,upos     :: Pos
 } deriving (Eq,Show)
 data Type = E | G deriving (Eq,Show)  -- elf, goblin
+type HP = Int
 type X = Int
 type Y = Int
 type Pos = (X,Y)
-type HP = Int
+type Path = [Pos]
+type Delay = Double
 
 parse :: String -> W
 parse s =
@@ -396,6 +402,7 @@ parseunit x y 'E' = Just $ U {utype=E, upos=(x,y), uhp=defhp}
 parseunit x y 'G' = Just $ U {utype=G, upos=(x,y), uhp=defhp}
 parseunit _ _ _   = Nothing
 
+showunit :: U -> Char
 showunit U{..} = head $ show utype
 
 defhp = 200
@@ -404,8 +411,6 @@ defhp = 200
 
 main :: IO ()
 main = do
-  hSetBuffering stdout NoBuffering
-
   -- let (usage,defargs) = ("Usage: ./14 [INPUTFILE]", ["14.in"])
   -- args <- getArgs
   -- -- when (null args) $ putStrLn usage >> exitSuccess
@@ -413,8 +418,13 @@ main = do
   -- -- input <- parse <$> readFile f
 
   -- part 1
-  (t,w) <- timeItT $ iterateUntilM ((==2).wtime) (update >=> printworld) <=< printworld $ parse t1
-  printf "\n%.3fs to simulate %d ticks (%.0f ticks/s)\n" t (wtime w) (fromIntegral (wtime w) / t)
+  -- (t,w) <- timeItT $ iterateUntilM ((==2).wtime) (update >=> printworld) <=< printworld $ parse t1
+  -- printfinaltime w t
+
+  (t,w) <- timeItT $
+     bracket_ initterm resetterm $
+       iterateUntilM ((==20).wtime) (update >=> displayworld 1) <=< displayworld 1 $ parse t1
+  printfinaltime w t
 
   -- part 2
   -- (t,w) <- timeItT $ iterateUntilM ((==1000).wtime) (update2 >=> printworld) $ parse t1
@@ -433,24 +443,89 @@ update w@W{..} = do
     ,wunits  = wunits'
     }
 
+sortunits :: [U] -> [U]
 sortunits = sortOn (\U{upos=(x,y)} -> (y,x))
 
+sortpoints :: [Pos] -> [Pos]
+sortpoints = sortOn (\(x,y) -> (y,x))
+
 updateunit :: W -> U -> IO U
-updateunit w@W{..} u@U{..} = do
+updateunit w@W{..} u = do
   -- move
   let targets = filter (u `doestarget`) wunits
-  let inrange = filter (isinrange u) targets 
-  --  if not target-adjacent, find most reachable target-adjacent space
-  let mdest = case inrange of
-          []  -> Just $ minimumBy (comparing (distance upos)) $
-                        concatMap (filter (isempty w) . adjacentspaces w) targets
-          _   -> Nothing
-    --   move towards
+      inrange = filter (isinrange u) targets
+  displaypoints w 0 (showunit u) [upos u] [
+     SetSwapForegroundBackground True
+    ] >> setSGR [
+     Reset
+    ] >> doinput w
+  displayworld 0 w >> displaypoints w 0 'T' (map upos targets) [] >> doinput w
+  displayworld 0 w >> displaypoints w 0 'I' (map upos inrange) [] >> doinput w
+  --  if not in range, find shortest path to a reachable in-range space
+  mpath <- case inrange of
+          _:_ -> return Nothing
+          []  ->
+            let
+              dests         = concatMap (emptyadjacentspaces w . upos) targets
+              shortestpaths = catMaybes $ map (shortestpath w (upos u)) dests
+            in
+              case shortestpaths of
+                []    -> return Nothing
+                paths -> do
+                  let reachable             = nub $ sortpoints $ map last paths
+                      shortestshortestpaths = head $ groupBy ((==) `on` length) paths
+                      nearestdests          = map last shortestshortestpaths
+                      dest                  = head $ sortpoints nearestdests
+                      destpaths             = filter ((==dest).last) shortestshortestpaths
+                      nextsteps             = map head destpaths
+                      nextstep              = head $ sortpoints nextsteps -- several paths might have same next step,
+                                                                          -- could compare second step.. let's not
+                      destpath              = head $ filter ((==nextstep).head) destpaths
+                  displayworld 0 w >> displaypoints w 0 '?' dests        [] >> doinput w
+                  displayworld 0 w >> displaypoints w 0 '@' reachable    [] >> doinput w
+                  displayworld 0 w >> displaypoints w 0 '!' nearestdests [] >> doinput w
+                  displayworld 0 w
+                    >> displaypoints w 0 ',' destpath     []
+                    >> displaypoints w 0 '+' [dest]       []
+                    >> doinput w
+                  displayworld 0 w
+                  return $ Just destpath
+
+  --   move towards
+  let u' = case mpath of
+             Just (nextpos:_) -> u{upos=nextpos}
+             Nothing          -> u
+
   -- attack
+
   --  if target-adjacent
   --   select lowest-hp adjacent target
   --   damage target
-  return u
+
+  return u'
+
+shortestpath :: W -> Pos -> Pos -> Maybe Path
+shortestpath w@W{..} startpos endpos =
+  aStar
+    (H.fromList . emptyadjacentspaces w)
+    distance
+    (distance startpos)
+    (==endpos)
+    startpos
+
+-- aStar :: (Hashable a, Ord a, Ord c, Num c) =>
+-- (a -> HashSet a)	
+-- The graph we are searching through, given as a function from vertices to their neighbours.
+-- -> (a -> a -> c)	
+-- Distance function between neighbouring vertices of the graph. This will never be applied to vertices that are not neighbours, so may be undefined on pairs that are not neighbours in the graph.
+-- -> (a -> c)	
+-- Heuristic distance to the (nearest) goal. This should never overestimate the distance, or else the path found may not be minimal.
+-- -> (a -> Bool)	
+-- The goal, specified as a boolean predicate on vertices.
+-- -> a	
+-- The vertex to start searching from.
+-- -> Maybe [a]	
+
 
 distance :: Pos -> Pos -> Int
 distance (ax,ay) (bx,by) = abs (ax - bx) + abs (ay - by)
@@ -463,15 +538,20 @@ isinrange U{upos=(ax,ay)} U{upos=(bx,by)} =
      abs (ax-bx)==1 && ay==by
   || abs (ay-by)==1 && ax==bx
 
-isempty :: W -> (X,Y) -> Bool
-isempty W{..} (x,y) = not $ any (\U{upos=(ux,uy)} -> ux==x && uy==y) wunits
-
-adjacentspaces :: W -> U -> [(X,Y)]
-adjacentspaces W{..} U{upos=(ux,uy)} =
+adjacentspaces :: W -> Pos -> [Pos]
+adjacentspaces W{..} (ux,uy) =
   let (_,(xmax,ymax)) = A.bounds wmap
   in
     filter (\(x,y) -> all id [x>=0, x<=xmax, y>=0, y<=ymax]) $
     [(ux,uy-1), (ux-1,uy), (ux+1,uy), (ux,uy+1)]
+
+emptyadjacentspaces :: W -> Pos -> [Pos]
+emptyadjacentspaces w = filter (isempty w) . adjacentspaces w
+
+isempty :: W -> (X,Y) -> Bool
+isempty W{..} (x,y) =
+     wmap A.! (x,y) == Floor
+  && not (any (\U{upos=(ux,uy)} -> ux==x && uy==y) wunits)
 
 -- display. these return the unmodified World for easier chaining
 
@@ -496,3 +576,85 @@ printdots w@W{..} = do
   when (wtime `mod` 1000 == 0) (putStr ".")
   return w
 
+printfinaltime W{..} t = do
+  printf "\n%.3fs to simulate %d ticks (%.0f ticks/s)\n" t wtime (fromIntegral wtime / t)
+
+initterm = do
+  hideCursor
+  hSetEcho stdout False
+  hSetBuffering stdin  NoBuffering
+  hSetBuffering stdout NoBuffering
+
+resetterm = do
+  setSGR [Reset]
+  -- showCursor
+
+-- display in an ansi terminal and pause for the given number of seconds
+-- (or if negative, wait and handle keypress)
+displayworld :: Delay -> W -> IO W
+displayworld delaysecs w@W{..} = do
+  Just (Window{..}) <- size
+
+  setSGR [
+     SetColor Foreground Vivid Green
+    ,SetColor Background Dull Black
+    ,SetConsoleIntensity BoldIntensity
+    ,SetSwapForegroundBackground False
+    ]
+  setCursorPosition 0 0
+  clearScreen
+  putStrLn $ "t " ++ show wtime ++ "  "
+
+  setSGR [
+     SetColor Foreground Dull Red
+    ,SetColor Background Dull Black
+    ,SetConsoleIntensity FaintIntensity
+    ,SetSwapForegroundBackground False
+    ]
+  let bg = fmap showtile wmap
+      (_,(xmax,ymax)) = A.bounds wmap
+  mapM_ putStrLn [ [bg A.! (x,y) | x <- [0..xmax]] | y <- [0..ymax] ]
+
+  setSGR [
+     SetColor Background Dull Black
+    ,SetColor Foreground Vivid White
+    ,SetConsoleIntensity BoldIntensity
+    ,SetSwapForegroundBackground False
+    ]
+  forM_ wunits $ \u@U{upos=(x,y),..} -> do
+    setCursorPosition (y+1) x
+    putChar $ showunit u
+
+  if delaysecs >=0
+  then delay delaysecs
+  else do
+    setSGR [
+       SetColor Foreground Dull White
+      ,SetColor Background Dull Black
+      ,SetConsoleIntensity FaintIntensity
+      ,SetSwapForegroundBackground False
+      ]
+    setCursorPosition (height-4) 0
+    putStrLn $ "\n\nq: quit,  any other key: advance"
+    void $ doinput w
+
+  return w
+
+delay secs = threadDelay $ round $ secs * 1e6
+
+displaypoints :: W -> Delay -> Char -> [Pos] -> [SGR] -> IO W
+displaypoints w d c ps style = do
+  setSGR style
+  forM_ ps $ \(x,y) -> do
+    setCursorPosition (y+1) x
+    putChar c
+  delay d
+  return w
+
+doinput w = do
+  -- Just (Window{..}) <- size
+  c <- getChar
+  case c of
+    'q' -> exitSuccess
+    _   -> return w
+  
