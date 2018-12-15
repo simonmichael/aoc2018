@@ -359,19 +359,19 @@ t1 = [here|
 type T = Int -- simulation time, 0..
 data W = W { -- simulation world
    wtime    :: T
-  ,wmap     :: A.Array (X,Y) Tile
+  ,wmap     :: A.Array Pos Tile
   ,wunits   :: [U]
 } deriving (Eq,Show)
 data Tile = Wall | Floor deriving (Eq,Show)
 data U = U {
    utype    :: Type
-  ,ux       :: X
-  ,uy       :: Y
+  ,upos     :: Pos
   ,uhp      :: HP
 } deriving (Eq,Show)
 data Type = E | G deriving (Eq,Show)  -- elf, goblin
 type X = Int
 type Y = Int
+type Pos = (X,Y)
 type HP = Int
 
 parse :: String -> W
@@ -392,8 +392,8 @@ parsetile _   = Floor
 showtile Wall  = '#'
 showtile Floor = '.'
 
-parseunit x y 'E' = Just $ U {utype=E, ux=x, uy=y, uhp=defhp}
-parseunit x y 'G' = Just $ U {utype=G, ux=x, uy=y, uhp=defhp}
+parseunit x y 'E' = Just $ U {utype=E, upos=(x,y), uhp=defhp}
+parseunit x y 'G' = Just $ U {utype=G, upos=(x,y), uhp=defhp}
 parseunit _ _ _   = Nothing
 
 showunit U{..} = head $ show utype
@@ -433,7 +433,7 @@ update w@W{..} = do
     ,wunits  = wunits'
     }
 
-sortunits = sortOn (\U{..} -> (uy,ux))
+sortunits = sortOn (\U{upos=(x,y)} -> (y,x))
 
 updateunit :: W -> U -> IO U
 updateunit w@W{..} u@U{..} = do
@@ -442,7 +442,7 @@ updateunit w@W{..} u@U{..} = do
   let inrange = filter (isinrange u) targets 
   --  if not target-adjacent, find most reachable target-adjacent space
   let mdest = case inrange of
-          []  -> Just $ minimumBy (comparing (distance (ux,uy))) $
+          []  -> Just $ minimumBy (comparing (distance upos)) $
                         concatMap (filter (isempty w) . adjacentspaces w) targets
           _   -> Nothing
     --   move towards
@@ -452,28 +452,31 @@ updateunit w@W{..} u@U{..} = do
   --   damage target
   return u
 
-distance :: (X,Y) -> (X,Y) -> Int
+distance :: Pos -> Pos -> Int
 distance (ax,ay) (bx,by) = abs (ax - bx) + abs (ay - by)
 
 doestarget :: U -> U -> Bool
 u `doestarget` t = utype t /= utype u
 
 isinrange :: U -> U -> Bool
-isinrange a b | abs (ux a - ux b) == 1 && uy a == uy b = True
-isinrange a b | abs (uy a - uy b) == 1 && ux a == ux b = True
-isinrange a b                                          = False
+isinrange U{upos=(ax,ay)} U{upos=(bx,by)} =
+     abs (ax-bx)==1 && ay==by
+  || abs (ay-by)==1 && ax==bx
 
 isempty :: W -> (X,Y) -> Bool
-isempty W{..} (x,y) = not $ any (\U{..} -> ux==x && uy==y) wunits
+isempty W{..} (x,y) = not $ any (\U{upos=(ux,uy)} -> ux==x && uy==y) wunits
 
 adjacentspaces :: W -> U -> [(X,Y)]
-adjacentspaces W{..} U{..} =
+adjacentspaces W{..} U{upos=(ux,uy)} =
   let (_,(xmax,ymax)) = A.bounds wmap
   in
     filter (\(x,y) -> all id [x>=0, x<=xmax, y>=0, y<=ymax]) $
     [(ux,uy-1), (ux-1,uy), (ux+1,uy), (ux,uy+1)]
 
 -- display. these return the unmodified World for easier chaining
+
+ux = fst . upos
+uy = snd . upos
 
 printworld :: W -> IO W
 printworld w@W{..} = do
