@@ -59,6 +59,7 @@ import Safe
 import System.Console.ANSI
 import System.Environment
 import System.IO
+import System.IO.Unsafe
 import System.Exit
 import System.TimeIt
 import qualified Text.Megaparsec as P
@@ -389,7 +390,7 @@ type Pos = (X,Y)
 type Path = [Pos]
 type Delay = Double
 
-parse :: String -> W
+parse :: HasCallStack => String -> W
 parse s =
   let
     ls = lines s
@@ -411,14 +412,14 @@ parseunit x y 'E' = Just $ U {utype=E, upos=(x,y), uhp=defhp}
 parseunit x y 'G' = Just $ U {utype=G, upos=(x,y), uhp=defhp}
 parseunit _ _ _   = Nothing
 
-showunit :: U -> Char
+showunit :: HasCallStack => U -> Char
 showunit U{..} = head $ show utype
 
 defhp = 200
 
 -- main
 
-main :: IO ()
+main :: HasCallStack => IO ()
 main = do
   -- let (usage,defargs) = ("Usage: ./14 [INPUTFILE]", ["14.in"])
   -- args <- getArgs
@@ -432,7 +433,7 @@ main = do
 
   (t,w) <- timeItT $
      bracket_ initterm resetterm $
-       iterateUntilM ((==20).wtime) (update >=> displayworld 1) <=< displayworld 1 $ parse t2
+       iterateUntilM ((==20).wtime) (update >=> displayworld 1) <=< displayworld 1 $ parse t3
   printfinaltime w t
 
   -- part 2
@@ -443,10 +444,13 @@ main = do
 
 -- update
 
-update :: W -> IO W
+update :: HasCallStack => W -> IO W
 update w@W{..} = do
   -- "Regardless of how the unit's turn ends, the next unit in the round takes its turn."
+  -- units should see the movements of other units earlier in the round, and not move into the same space
   wunits' <- mapM (updateunit w) $ sortunits wunits
+  -- wunits' <- foldM (\us u -> updateunit w{wunits=us} u >>= \u -> return $ u: (us \\ [u])) wunits $ sortunits wunits
+  displayinfo w "units" (ppShow wunits') >> doinput w
   return w{
      wtime   = wtime + 1
     ,wunits  = wunits'
@@ -458,54 +462,49 @@ sortunits = sortOn (\U{upos=(x,y)} -> (y,x))
 sortpoints :: [Pos] -> [Pos]
 sortpoints = sortOn (\(x,y) -> (y,x))
 
-updateunit :: W -> U -> IO U
+updateunit :: HasCallStack => W -> U -> IO U
 updateunit w@W{..} u = do
   -- move
   let targets = filter (u `doestarget`) wunits
       inrange = filter (isinrange u) targets
-  displaypoints w 0.5 (showunit u) [upos u] [
-     SetSwapForegroundBackground True
-    ] >> setSGR [
-     Reset
-    ] >> displayinfo w "current unit; other units" (ppShow wunits) >> doinput w
-  displayworld 0.5 w >> displaypoints w 0 'T' (map upos targets) [] >> displayinfo w "targets" (ppShow $ map upos targets)
-  displayworld 0.5 w >> displaypoints w 0 'I' (map upos inrange) [] >> displayinfo w "in range" (ppShow $ map upos inrange)
+  -- displaypoints w 0 (showunit u) [upos u] [
+  --    SetSwapForegroundBackground True
+  --   ] >> setSGR [
+  --    Reset
+  --   ] >> displayinfo w "current unit ^\nall units" (ppShow wunits) >> doinput w
+  -- displayworld 0 w >> displaypoints w 0 'T' (map upos targets) [] >> displayinfo w "targets" (ppShow $ map upos targets)
+  -- displayworld 0 w >> displaypoints w 0 'I' (map upos inrange) [] >> displayinfo w "in range" (ppShow $ map upos inrange)
   --  if not in range, find shortest path to a reachable in-range space
   mpath <- case inrange of
           _:_ -> return Nothing
           []  ->
             let
               dests         = concatMap (emptyadjacentspaces w . upos) targets
-              shortestpaths = catMaybes $ map (shortestpath w (upos u)) dests
+              shortestpaths = catMaybes $ map (astarshortestpathreadorder w (upos u)) dests
             in
               case shortestpaths of
                 []    -> return Nothing
                 paths -> do
                   let reachable             = nub $ sortpoints $ map last paths
                       shortestshortestpaths = head $ groupBy ((==)`on`length) $ sortOn length paths
-                      nearestdests          = map last shortestshortestpaths
+                      nearestdests          = nub $ sort $ map last shortestshortestpaths
                       dest                  = head $ sortpoints nearestdests
                       destpaths             = filter ((==dest).last) shortestshortestpaths
-                      nextsteps             = map head destpaths
-                      nextstep              = head $ sortpoints nextsteps -- several paths might have same next step,
-                                                                          -- could compare second step.. let's not
-                      path                  = head $ filter ((==nextstep).head) destpaths
-                  displayworld 0 w >> displaypoints w 0 '?' dests        [] >> displayinfo w "dests" (ppShow dests) >> doinput w
-                  displayworld 0 w >> displaypoints w 0 '@' reachable    [] >> displayinfo w "reachable" (ppShow reachable) >> doinput w
-                  displayinfo w "all dests' shortest paths" (ppShow shortestpaths) >> doinput w
-                  displayworld 0 w >> displayinfo w "shortestshortestpaths" (ppShow shortestshortestpaths) >> doinput w
-                  displayworld 0 w >> displaypoints w 0 '!' nearestdests [] >> displayinfo w "nearestdests" (ppShow nearestdests) >> doinput w
-                  displayworld 0 w >> displayinfo w "dest" (show dest) >> doinput w
-                  displayworld 0 w >> displayinfo w "destpaths" (ppShow destpaths) >> doinput w
-                  displayworld 0 w >> displayinfo w "nextsteps" (ppShow nextsteps) >> doinput w
-                  displayworld 0 w >> displayinfo w "nextstep" (show nextstep) >> doinput w
+                      chosenpath            = head $ sortOn (\((x,y):_) -> (y,x)) $ destpaths
+                  -- displayworld 0 w >> displaypoints w 0 '?' dests        [] >> displayinfo w "dests" (ppShow dests) >> doinput w
+                  -- displayworld 0 w >> displaypoints w 0 '@' reachable    [] >> displayinfo w "reachable" (ppShow reachable) >> doinput w
+                  -- displayinfo w "all dests' shortest paths" (ppShow shortestpaths) >> doinput w
+                  -- displayworld 0 w >> displayinfo w "shortestshortestpaths" (ppShow shortestshortestpaths) >> doinput w
+                  -- displayworld 0 w >> displaypoints w 0 '!' nearestdests [] >> displayinfo w "nearestdests" (ppShow nearestdests) >> doinput w
+                  -- displayworld 0 w >> displayinfo w "dest" (show dest) >> doinput w
+                  -- displayworld 0 w >> displayinfo w "destpaths" (ppShow destpaths) >> doinput w
                   displayworld 0 w
-                    >> displaypoints w 0 '.' path []
+                    >> displaypoints w 0 '.' chosenpath []
                     >> displaypoints w 0 '+' [dest] []
-                    >> displayinfo w "path" (show path)
+                    -- >> displayinfo w "chosenpath" (ppShow chosenpath)
                     >> doinput w
                   displayworld 0 w
-                  return $ Just path
+                  return $ Just chosenpath
 
   --   move towards
   let u' = case mpath of
@@ -525,8 +524,28 @@ displayinfo W{..} label s = do
   setCursorPosition (ymax+3) 0
   putStrLn $ label ++ ":\n" ++ s
 
-shortestpath :: W -> Pos -> Pos -> Maybe Path
-shortestpath w@W{..} startpos endpos =
+ttrace :: Show a => W -> String -> a -> a
+ttrace w msg x =
+  unsafePerformIO (displayinfo w msg (ppShow x)) `seq`
+  x
+
+-- the astar lib returns only one shortest path, so run it from each
+-- adjacent position and if there are several with the shortest length
+-- pick the reading-order one
+astarshortestpathreadorder :: HasCallStack => W -> Pos -> Pos -> Maybe Path
+astarshortestpathreadorder w@W{..} startpos endpos =
+  let
+    starts'       = emptyadjacentspaces w startpos
+    paths         = [(s, fromJust p) | s <- starts', let p = astarshortestpath w s endpos, isJust p]
+    shortestpaths = headMay $ groupBy ((==) `on` (length.snd)) $ sortOn (length.snd) paths
+  in
+    case shortestpaths of
+      Nothing      -> Nothing
+      Just [(s,p)] -> Just $ s:p
+      Just ps      -> Just $ s:p where (s,p) = head $ sortOn (\(_,((x,y):_)) -> (y,x)) ps
+
+astarshortestpath :: W -> Pos -> Pos -> Maybe Path
+astarshortestpath w@W{..} startpos endpos =
   aStar
     (H.fromList . emptyadjacentspaces w) -- (a -> HashSet a) The graph we are searching through, given as a function from vertices to their neighbours.
     distance                             -- (a -> a -> c)	   Distance function between neighbouring vertices of the graph. This will never be applied to vertices that are not neighbours, so may be undefined on pairs that are not neighbours in the graph.
@@ -594,7 +613,7 @@ initterm = do
 
 resetterm = do
   setSGR [Reset]
-  -- showCursor
+  showCursor
 
 toscreenx = (+1)
 toscreeny = (+2)
@@ -611,7 +630,7 @@ displaypoints w d c ps style = do
 
 -- display in an ansi terminal and pause for the given number of seconds
 -- (or if negative, wait and handle keypress)
-displayworld :: Delay -> W -> IO W
+displayworld :: HasCallStack => Delay -> W -> IO W
 displayworld delaysecs w@W{..} = do
   Just (Window{..}) <- size
 
@@ -645,6 +664,9 @@ displayworld delaysecs w@W{..} = do
   forM_ wunits $ \u@U{upos=(x,y),..} -> do
     setCursorPosition (toscreeny y) (toscreenx x)
     putChar $ showunit u
+
+  -- position cursor for debug printing
+  setCursorPosition (ymax+3) 0
 
   if delaysecs >=0
   then delay delaysecs
