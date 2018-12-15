@@ -118,13 +118,6 @@ seqIndexL needle haystack =
 
 -- examples
 
--- Targets:      In range:     Reachable:    Nearest:      Chosen:
--- #######       #######       #######       #######       #######
--- #E..G.#       #E.?G?#       #E.@G.#       #E.!G.#       #E.+G.#
--- #...#.#  -->  #.?.#?#  -->  #.@.#.#  -->  #.!.#.#  -->  #...#.#
--- #.G.#G#       #?G?#G#       #@G@#G#       #!G.#G#       #.G.#G#
--- #######       #######       #######       #######       #######
-
 t1 = [here|
 #######
 #E..G.#
@@ -132,7 +125,21 @@ t1 = [here|
 #.G.#G#
 #######
 |]
+-- Targets:      In range:     Reachable:    Nearest:      Chosen:
+-- #######       #######       #######       #######       #######
+-- #E..G.#       #E.?G?#       #E.@G.#       #E.!G.#       #E.+G.#
+-- #...#.#  -->  #.?.#?#  -->  #.@.#.#  -->  #.!.#.#  -->  #...#.#
+-- #.G.#G#       #?G?#G#       #@G@#G#       #!G.#G#       #.G.#G#
+-- #######       #######       #######       #######       #######
 
+
+t2 = [here|
+#######
+#.E...#
+#...?.#
+#..?G?#
+#######
+|]
 -- In range:     Nearest:      Chosen:       Distance:     Step:
 -- #######       #######       #######       #######       #######
 -- #.E...#       #.E...#       #.E...#       #4E212#       #..E..#
@@ -141,15 +148,17 @@ t1 = [here|
 -- #######       #######       #######       #######       #######
 
 -- Initially:
--- #########
--- #G..G..G#
--- #.......#
--- #.......#
--- #G..E..G#
--- #.......#
--- #.......#
--- #G..G..G#
--- #########
+t3 = [here|
+#########
+#G..G..G#
+#.......#
+#.......#
+#G..E..G#
+#.......#
+#.......#
+#G..G..G#
+#########
+|]
 
 -- After 1 round:
 -- #########
@@ -423,7 +432,7 @@ main = do
 
   (t,w) <- timeItT $
      bracket_ initterm resetterm $
-       iterateUntilM ((==20).wtime) (update >=> displayworld 1) <=< displayworld 1 $ parse t1
+       iterateUntilM ((==20).wtime) (update >=> displayworld 1) <=< displayworld 1 $ parse t2
   printfinaltime w t
 
   -- part 2
@@ -454,13 +463,13 @@ updateunit w@W{..} u = do
   -- move
   let targets = filter (u `doestarget`) wunits
       inrange = filter (isinrange u) targets
-  displaypoints w 0 (showunit u) [upos u] [
+  displaypoints w 0.5 (showunit u) [upos u] [
      SetSwapForegroundBackground True
     ] >> setSGR [
      Reset
-    ] >> doinput w
-  displayworld 0 w >> displaypoints w 0 'T' (map upos targets) [] >> doinput w
-  displayworld 0 w >> displaypoints w 0 'I' (map upos inrange) [] >> doinput w
+    ] >> displayinfo w "current unit; other units" (ppShow wunits) >> doinput w
+  displayworld 0.5 w >> displaypoints w 0 'T' (map upos targets) [] >> displayinfo w "targets" (ppShow $ map upos targets)
+  displayworld 0.5 w >> displaypoints w 0 'I' (map upos inrange) [] >> displayinfo w "in range" (ppShow $ map upos inrange)
   --  if not in range, find shortest path to a reachable in-range space
   mpath <- case inrange of
           _:_ -> return Nothing
@@ -473,23 +482,30 @@ updateunit w@W{..} u = do
                 []    -> return Nothing
                 paths -> do
                   let reachable             = nub $ sortpoints $ map last paths
-                      shortestshortestpaths = head $ groupBy ((==) `on` length) paths
+                      shortestshortestpaths = head $ groupBy ((==)`on`length) $ sortOn length paths
                       nearestdests          = map last shortestshortestpaths
                       dest                  = head $ sortpoints nearestdests
                       destpaths             = filter ((==dest).last) shortestshortestpaths
                       nextsteps             = map head destpaths
                       nextstep              = head $ sortpoints nextsteps -- several paths might have same next step,
                                                                           -- could compare second step.. let's not
-                      destpath              = head $ filter ((==nextstep).head) destpaths
-                  displayworld 0 w >> displaypoints w 0 '?' dests        [] >> doinput w
-                  displayworld 0 w >> displaypoints w 0 '@' reachable    [] >> doinput w
-                  displayworld 0 w >> displaypoints w 0 '!' nearestdests [] >> doinput w
+                      path                  = head $ filter ((==nextstep).head) destpaths
+                  displayworld 0 w >> displaypoints w 0 '?' dests        [] >> displayinfo w "dests" (ppShow dests) >> doinput w
+                  displayworld 0 w >> displaypoints w 0 '@' reachable    [] >> displayinfo w "reachable" (ppShow reachable) >> doinput w
+                  displayinfo w "all dests' shortest paths" (ppShow shortestpaths) >> doinput w
+                  displayworld 0 w >> displayinfo w "shortestshortestpaths" (ppShow shortestshortestpaths) >> doinput w
+                  displayworld 0 w >> displaypoints w 0 '!' nearestdests [] >> displayinfo w "nearestdests" (ppShow nearestdests) >> doinput w
+                  displayworld 0 w >> displayinfo w "dest" (show dest) >> doinput w
+                  displayworld 0 w >> displayinfo w "destpaths" (ppShow destpaths) >> doinput w
+                  displayworld 0 w >> displayinfo w "nextsteps" (ppShow nextsteps) >> doinput w
+                  displayworld 0 w >> displayinfo w "nextstep" (show nextstep) >> doinput w
                   displayworld 0 w
-                    >> displaypoints w 0 ',' destpath     []
-                    >> displaypoints w 0 '+' [dest]       []
+                    >> displaypoints w 0 '.' path []
+                    >> displaypoints w 0 '+' [dest] []
+                    >> displayinfo w "path" (show path)
                     >> doinput w
                   displayworld 0 w
-                  return $ Just destpath
+                  return $ Just path
 
   --   move towards
   let u' = case mpath of
@@ -504,28 +520,19 @@ updateunit w@W{..} u = do
 
   return u'
 
+displayinfo W{..} label s = do
+  let (_,(_,ymax)) = A.bounds wmap
+  setCursorPosition (ymax+3) 0
+  putStrLn $ label ++ ":\n" ++ s
+
 shortestpath :: W -> Pos -> Pos -> Maybe Path
 shortestpath w@W{..} startpos endpos =
   aStar
-    (H.fromList . emptyadjacentspaces w)
-    distance
-    (distance startpos)
-    (==endpos)
-    startpos
-
--- aStar :: (Hashable a, Ord a, Ord c, Num c) =>
--- (a -> HashSet a)	
--- The graph we are searching through, given as a function from vertices to their neighbours.
--- -> (a -> a -> c)	
--- Distance function between neighbouring vertices of the graph. This will never be applied to vertices that are not neighbours, so may be undefined on pairs that are not neighbours in the graph.
--- -> (a -> c)	
--- Heuristic distance to the (nearest) goal. This should never overestimate the distance, or else the path found may not be minimal.
--- -> (a -> Bool)	
--- The goal, specified as a boolean predicate on vertices.
--- -> a	
--- The vertex to start searching from.
--- -> Maybe [a]	
-
+    (H.fromList . emptyadjacentspaces w) -- (a -> HashSet a) The graph we are searching through, given as a function from vertices to their neighbours.
+    distance                             -- (a -> a -> c)	   Distance function between neighbouring vertices of the graph. This will never be applied to vertices that are not neighbours, so may be undefined on pairs that are not neighbours in the graph.
+    (distance startpos)                  -- (a -> c)	       Heuristic distance to the (nearest) goal. This should never overestimate the distance, or else the path found may not be minimal.
+    (==endpos)                           -- (a -> Bool)	     The goal, specified as a boolean predicate on vertices.
+    startpos                             -- a	               The vertex to start searching from.
 
 distance :: Pos -> Pos -> Int
 distance (ax,ay) (bx,by) = abs (ax - bx) + abs (ay - by)
@@ -589,6 +596,19 @@ resetterm = do
   setSGR [Reset]
   -- showCursor
 
+toscreenx = (+1)
+toscreeny = (+2)
+
+-- display a character with a style at some positions, and pause
+displaypoints :: W -> Delay -> Char -> [Pos] -> [SGR] -> IO W
+displaypoints w d c ps style = do
+  setSGR style
+  forM_ ps $ \(x,y) -> do
+    setCursorPosition (toscreeny y) (toscreenx x)
+    putChar c
+  delay d
+  return w
+
 -- display in an ansi terminal and pause for the given number of seconds
 -- (or if negative, wait and handle keypress)
 displayworld :: Delay -> W -> IO W
@@ -613,7 +633,8 @@ displayworld delaysecs w@W{..} = do
     ]
   let bg = fmap showtile wmap
       (_,(xmax,ymax)) = A.bounds wmap
-  mapM_ putStrLn [ [bg A.! (x,y) | x <- [0..xmax]] | y <- [0..ymax] ]
+  putStrLn $ " " ++ concatMap show [0..xmax]
+  mapM_ putStrLn [ show y ++ [bg A.! (x,y) | x <- [0..xmax]] | y <- [0..ymax] ]
 
   setSGR [
      SetColor Background Dull Black
@@ -622,39 +643,31 @@ displayworld delaysecs w@W{..} = do
     ,SetSwapForegroundBackground False
     ]
   forM_ wunits $ \u@U{upos=(x,y),..} -> do
-    setCursorPosition (y+1) x
+    setCursorPosition (toscreeny y) (toscreenx x)
     putChar $ showunit u
 
   if delaysecs >=0
   then delay delaysecs
-  else do
-    setSGR [
-       SetColor Foreground Dull White
-      ,SetColor Background Dull Black
-      ,SetConsoleIntensity FaintIntensity
-      ,SetSwapForegroundBackground False
-      ]
-    setCursorPosition (height-4) 0
-    putStrLn $ "\n\nq: quit,  any other key: advance"
-    void $ doinput w
-
+  else void $ doinput w
   return w
 
 delay secs = threadDelay $ round $ secs * 1e6
 
-displaypoints :: W -> Delay -> Char -> [Pos] -> [SGR] -> IO W
-displaypoints w d c ps style = do
-  setSGR style
-  forM_ ps $ \(x,y) -> do
-    setCursorPosition (y+1) x
-    putChar c
-  delay d
-  return w
-
 doinput w = do
-  -- Just (Window{..}) <- size
+  displayprompt
   c <- getChar
   case c of
     'q' -> exitSuccess
     _   -> return w
   
+displayprompt = do
+  Just (Window{..}) <- size
+  setSGR [
+     SetColor Foreground Dull White
+    ,SetColor Background Dull Black
+    ,SetConsoleIntensity FaintIntensity
+    ,SetSwapForegroundBackground False
+    ]
+  setCursorPosition (height-4) 0
+  putStrLn $ "\n\nq: quit,  any other key: advance"
+
