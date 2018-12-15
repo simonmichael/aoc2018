@@ -328,11 +328,13 @@ dirdelta _   = (0,0)
 peek track (x,y) = track !! y !! x
 
 -- move the given cart, possibly crashing it and other affected carts.
+-- args:    part2?, track, all carts, cart to update
+-- returns: all carts with the one cart updated
 move :: Bool -> Track -> [Cart] -> Cart -> [Cart]
-move part2 _     cs    (_,'X',_)        = cs  -- already crashed carts do nothing
+move _ _     cs    (_,'X',_) = cs  -- already crashed carts do nothing
 move part2 track carts cart@((x,y),d,i) =
-  (if part2 then filter ((/='X').second3) else id) $
-  cart' : map (maybecrashothers cart') (carts \\ [cart])
+  (if part2 then filter ((/='X').second3) else id) $     -- remove any crashed carts
+  cart' : map (maybecrashothers cart') (carts \\ [cart]) -- update this cart, and if it crashed also mark the other cart as crashed
   where
     (dx,dy) = dirdelta d
     (ax,ay) = (x+dx,y+dy)
@@ -340,7 +342,7 @@ move part2 track carts cart@((x,y),d,i) =
     cartsahead  = filter ((==(ax,ay)).first3) carts
     cart' =
       case (cartsahead, lookup (d,trackahead) transitions) of
-        ((_:_), _)      -> ((ax,ay),'X',i)
+        ((_:_), _)      -> ((ax,ay),'X',i)  -- cart ahead - crash!
         ([],  Just 'X') -> ((x,y),'X',i)
         ([],  Just '+') -> ((ax,ay),nextintersectiondir i d,i+1)
         ([],  Just c)   -> ((ax,ay),c,i)
