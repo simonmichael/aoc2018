@@ -426,10 +426,52 @@ main = do
 
 update :: W -> IO W
 update w@W{..} = do
+  -- "Regardless of how the unit's turn ends, the next unit in the round takes its turn."
+  wunits' <- mapM (updateunit w) $ sortunits wunits
   return w{
      wtime   = wtime + 1
-    ,wunits  = wunits
+    ,wunits  = wunits'
     }
+
+sortunits = sortOn (\U{..} -> (uy,ux))
+
+updateunit :: W -> U -> IO U
+updateunit w@W{..} u@U{..} = do
+  -- move
+  let targets = filter (u `doestarget`) wunits
+  let inrange = filter (isinrange u) targets 
+  --  if not target-adjacent, find most reachable target-adjacent space
+  let mdest = case inrange of
+          []  -> Just $ minimumBy (comparing (distance (ux,uy))) $
+                        concatMap (filter (isempty w) . adjacentspaces w) targets
+          _   -> Nothing
+    --   move towards
+  -- attack
+  --  if target-adjacent
+  --   select lowest-hp adjacent target
+  --   damage target
+  return u
+
+distance :: (X,Y) -> (X,Y) -> Int
+distance (ax,ay) (bx,by) = abs (ax - bx) + abs (ay - by)
+
+doestarget :: U -> U -> Bool
+u `doestarget` t = utype t /= utype u
+
+isinrange :: U -> U -> Bool
+isinrange a b | abs (ux a - ux b) == 1 && uy a == uy b = True
+isinrange a b | abs (uy a - uy b) == 1 && ux a == ux b = True
+isinrange a b                                          = False
+
+isempty :: W -> (X,Y) -> Bool
+isempty W{..} (x,y) = not $ any (\U{..} -> ux==x && uy==y) wunits
+
+adjacentspaces :: W -> U -> [(X,Y)]
+adjacentspaces W{..} U{..} =
+  let (_,(xmax,ymax)) = A.bounds wmap
+  in
+    filter (\(x,y) -> all id [x>=0, x<=xmax, y>=0, y<=ymax]) $
+    [(ux,uy-1), (ux-1,uy), (ux+1,uy), (ux,uy+1)]
 
 -- display. these return the unmodified World for easier chaining
 
