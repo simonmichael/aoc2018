@@ -186,12 +186,36 @@ main = do
       after = read after'
 
   hSetBuffering stdout NoBuffering
-  ss <- fmap (map fromscore . toList) $ nextScores after 10 return $ parse "37"
-  putStrLn ss
+
+  -- part 1
+  -- ss <- fmap (map fromscore . toList) $ nextScores after 10 return $ parse "37"
+  -- putStrLn ss
     -- 633601: 5115114101
 
+  -- part 2
+  (t,w') <- timeItT $ iterateUntilM (recipes after) (update1 >=> return) $ parse "37"
+  printf "%.3fs to calculate %d scores (%.0f scores/s)\n" t after (fromIntegral after / t)
+  -- let needle = "51589"
+  -- printf "%s found at %s\n" needle (show $ seqIndexL (S.fromList $ map toscore needle) $ wscores w')
+  -- let needle = "01245"
+  -- printf "%s found at %s\n" needle (show $ seqIndexL (S.fromList $ map toscore needle) $ wscores w')
+  -- let needle = "92510"
+  -- printf "%s found at %s\n" needle (show $ seqIndexL (S.fromList $ map toscore needle) $ wscores w')
+  -- let needle = "59414"
+  -- printf "%s found at %s\n" needle (show $ seqIndexL (S.fromList $ map toscore needle) $ wscores w')
+  let needle = "633601"
+  printf "%s found at %s\n" needle (show $ seqIndexL (S.fromList $ map toscore needle) $ wscores w')
+    -- 106.762s to calculate 100000000 scores (936663 scores/s)
+    -- 633601 found at Just 20310465
 
--- part 1 world update function
+-- | after the first m scores in the given World, get the next n scores
+nextScores :: Int -> Int -> (W -> IO W) -> W -> IO (S.Seq S)
+nextScores afterm nextn display w = do
+  (t,w') <- timeItT $ iterateUntilM (recipes (afterm + nextn)) (update1 >=> display) <=< display $ w
+  printf "%.3fs to generate %d scores (%.0f scores/s)\n" t afterm (fromIntegral afterm / t)
+  return $ S.take nextn $ S.drop afterm $ wscores w'
+
+-- | world update function
 update1 :: W -> IO W
 update1 w@W{..} = do
   let
@@ -208,12 +232,10 @@ update1 w@W{..} = do
     ,welf2   = welf2'
     }
 
--- | after the first m scores in the given World, get the next n scores
-nextScores :: Int -> Int -> (W -> IO W) -> W -> IO (S.Seq S)
-nextScores afterm nextn display w = do
-  (t,w') <- timeItT $ iterateUntilM (recipes (afterm + nextn)) (update1 >=> display) <=< display $ w
-  printf "%.3fs to generate %d scores (%.0f scores/s)\n" t afterm (fromIntegral afterm / t)
-  return $ S.take nextn $ S.drop afterm $ wscores w'
+-- | find starting index of the first occurence of the first sequence within the second
+seqIndexL :: Eq a => S.Seq a -> S.Seq a -> Maybe Int
+seqIndexL needle haystack =
+  findIndex (\t -> S.take (S.length needle) t == needle) $ toList $ S.tails haystack
 
 -- display functions, these return the unmodified World for easier chaining
 
