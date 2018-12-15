@@ -370,11 +370,12 @@ t3 = [here|
 
 -- data
 
-type T = Int -- simulation time, 0..
+type T = Int -- simulation ticks, 0..
 data W = W { -- simulation world
    wtime    :: T
   ,wmap     :: A.Array Pos Tile
   ,wunits   :: [U]
+  ,wend     :: Maybe String
 } deriving (Eq,Show)
 data Tile = Wall | Floor deriving (Eq,Show)
 data U = U {
@@ -400,6 +401,7 @@ parse s =
     W{wtime   = 0
      ,wmap    = A.array ((0,0),(w-1,h-1)) [ ((x,y), parsetile c) | (y,l) <- zip [0..] ls, (x,c) <- zip [0..] l ]
      ,wunits  = catMaybes $ concat [ [(parseunit x y c) | (x,c) <- zip [0..] l ] | (y,l) <- zip [0..] ls ]
+     ,wend    = Nothing
     }
 
 parsetile '#' = Wall
@@ -433,8 +435,8 @@ main = do
 
   (t,w) <- timeItT $
      bracket_ initterm resetterm $
-       iterateUntilM ((==20).wtime) (update >=> displayworld 1) <=< displayworld 1 $ parse t3
-  printfinaltime w t
+       iterateUntilM (isJust.wend) (update >=> displayworld (-1)) <=< displayworld (-1) $ parse t3
+  printfinalsummary w t
 
   -- part 2
   -- (t,w) <- timeItT $ iterateUntilM ((==1000).wtime) (update2 >=> printworld) $ parse t1
@@ -447,14 +449,28 @@ main = do
 update :: HasCallStack => W -> IO W
 update w@W{..} = do
   -- "Regardless of how the unit's turn ends, the next unit in the round takes its turn."
-  -- units should see the movements of other units earlier in the round, and not move into the same space
-  wunits' <- mapM (updateunit w) $ sortunits wunits
-  -- wunits' <- foldM (\us u -> updateunit w{wunits=us} u >>= \u -> return $ u: (us \\ [u])) wunits $ sortunits wunits
-  displayinfo w "units" (ppShow wunits') >> doinput w
-  return w{
+
+  wunits' <- foldM
+    (\us u -> do
+        -- update this unit, seeing units updated earlier in the round
+        u' <- updateunit w{wunits=us} u
+        -- replace this unit in the units list. Each unit has a unique position.
+        let us' = u' : (us \\ [u])
+        return us'
+    )
+    wunits
+    (sortunits wunits)
+
+  let w' = w{
      wtime   = wtime + 1
     ,wunits  = wunits'
-    }
+    } & if (wunits'==wunits) then endworld "units have stabilised" else id
+
+  return w'
+
+-- trigger the end of the world, and set the reason unless it's already set
+endworld :: String -> W -> W
+endworld reason w@W{..} = w{wend=maybe (Just reason) Just wend}
 
 sortunits :: [U] -> [U]
 sortunits = sortOn (\U{upos=(x,y)} -> (y,x))
@@ -500,9 +516,8 @@ updateunit w@W{..} u = do
                   -- displayworld 0 w >> displayinfo w "destpaths" (ppShow destpaths) >> doinput w
                   displayworld 0 w
                     >> displaypoints w 0 '.' chosenpath []
-                    >> displaypoints w 0 '+' [dest] []
-                    -- >> displayinfo w "chosenpath" (ppShow chosenpath)
-                    >> doinput w
+                    >> displaypoints w 0.1 '+' [dest] []
+                    -- >> doinput w
                   displayworld 0 w
                   return $ Just chosenpath
 
@@ -602,8 +617,11 @@ printdots w@W{..} = do
   when (wtime `mod` 1000 == 0) (putStr ".")
   return w
 
-printfinaltime W{..} t = do
-  printf "\n%.3fs to simulate %d ticks (%.0f ticks/s)\n" t wtime (fromIntegral wtime / t)
+printfinalsummary :: W -> Double -> IO ()
+printfinalsummary W{..} t = do
+  printf "\n%s\n" (fromMaybe "" wend)
+  printf "%.3fs to simulate %d ticks (%.0f ticks/s)\n" t wtime (fromIntegral wtime / t)
+  -- doinput w
 
 initterm = do
   hideCursor
@@ -635,8 +653,8 @@ displayworld delaysecs w@W{..} = do
   Just (Window{..}) <- size
 
   setSGR [
-     SetColor Foreground Vivid Green
-    ,SetColor Background Dull Black
+     SetColor Background Dull Black
+    ,SetColor Foreground Vivid White
     ,SetConsoleIntensity BoldIntensity
     ,SetSwapForegroundBackground False
     ]
@@ -675,11 +693,12 @@ displayworld delaysecs w@W{..} = do
 
 delay secs = threadDelay $ round $ secs * 1e6
 
-doinput w = do
+doinput w@W{..} = do
   displayprompt
   c <- getChar
   case c of
     'q' -> exitSuccess
+    'i' -> displayinfo w "units" (ppShow wunits) >> doinput w
     _   -> return w
   
 displayprompt = do
@@ -691,5 +710,5 @@ displayprompt = do
     ,SetSwapForegroundBackground False
     ]
   setCursorPosition (height-4) 0
-  putStrLn $ "\n\nq: quit,  any other key: advance"
+  putStrLn $ "\n\nq: quit,  i: info,  any other key: advance"
 
