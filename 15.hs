@@ -369,7 +369,7 @@ data U = U {
   ,uy       :: Y
   ,uhp      :: HP
 } deriving (Eq,Show)
-data Type = Elf | Goblin deriving (Eq,Show)
+data Type = E | G deriving (Eq,Show)  -- elf, goblin
 type X = Int
 type Y = Int
 type HP = Int
@@ -383,14 +383,22 @@ parse s =
   in
     W{wtime   = 0
      ,wmap    = A.array ((0,0),(w-1,h-1)) [ ((x,y), parsetile c) | (y,l) <- zip [0..] ls, (x,c) <- zip [0..] l ]
-     ,wunits  = []
+     ,wunits  = catMaybes $ concat [ [(parseunit x y c) | (x,c) <- zip [0..] l ] | (y,l) <- zip [0..] ls ]
     }
 
 parsetile '#' = Wall
 parsetile _   = Floor
 
-formattile Wall  = '#'
-formattile Floor = '.'
+showtile Wall  = '#'
+showtile Floor = '.'
+
+parseunit x y 'E' = Just $ U {utype=E, ux=x, uy=y, uhp=defhp}
+parseunit x y 'G' = Just $ U {utype=G, ux=x, uy=y, uhp=defhp}
+parseunit _ _ _   = Nothing
+
+showunit U{..} = head $ show utype
+
+defhp = 200
 
 -- main
 
@@ -405,7 +413,7 @@ main = do
   -- -- input <- parse <$> readFile f
 
   -- part 1
-  (t,w) <- timeItT $ iterateUntilM ((==10).wtime) (update >=> printworld) $ parse t1
+  (t,w) <- timeItT $ iterateUntilM ((==2).wtime) (update >=> printworld) <=< printworld $ parse t1
   printf "\n%.3fs to simulate %d ticks (%.0f ticks/s)\n" t (wtime w) (fromIntegral (wtime w) / t)
 
   -- part 2
@@ -427,9 +435,11 @@ update w@W{..} = do
 
 printworld :: W -> IO W
 printworld w@W{..} = do
-  printf "%4d:  %s\n" wtime (show wunits)
+  printf "%d:  \n%s\n" wtime (ppShow wunits)
   let (_,(xmax,ymax)) = A.bounds wmap
-  mapM_ putStrLn [ [formattile $ wmap A.! (x,y) | x <- [0..xmax]] | y <- [0..ymax] ]
+      bgcs  = fmap showtile wmap
+      allcs = bgcs A.// [ ((ux u, uy u), showunit u) | u <- wunits]
+  mapM_ putStrLn [ [allcs A.! (x,y) | x <- [0..xmax]] | y <- [0..ymax] ]
   putStrLn ""
   return w
 
