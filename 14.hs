@@ -137,23 +137,27 @@ type T = Int -- simulation time, 0..
 type S = Int -- recipe score, 0..9
 data W = W { -- world
    wtime    :: T
-  ,wscores  :: [S]
-  ,welf1    :: S
-  ,welf2    :: S
+  ,wscores  :: S.Seq S
+  ,welf1    :: Int
+  ,welf2    :: Int
 } deriving (Show)
 
 parse :: String -> W
 parse s =
   W{wtime   = 1
-   ,wscores = map toscore s
+   ,wscores = S.fromList $ map toscore s
    ,welf1   = 0
    ,welf2   = 1
    }
 
+toscore :: Char -> S
 toscore c = ord c - ord '0'
 
+fromscore :: S -> Char
+fromscore = chr . (+ ord '0')
+
 time    n W{..} = wtime == n
-recipes n W{..} = length wscores >= n
+recipes n W{..} = S.length wscores >= n
 
 main :: IO ()
 main = do
@@ -176,42 +180,27 @@ main = do
   -- ss <- fmap (concatMap show) $ nextScores 2018 10 return $ parse "37"
   -- putStr ss >> assert_ (ss == "5941429882") >> putStrLn ": ok"
 
-  
-  -- let ontheboard = "3710"
-  --     input = "633601"
-  --     wrong = ["9714214618", "1034973697", "3497369736"]   -- rejected answers (also 9,7,1,4,2,1,4,6,1,8)
-  -- ss <- fmap (concatMap show) $ nextScores (length input) 10 printworld $ parse (ontheboard ++ input)
-  -- -- putStr ss >> assert_ (not $ ss `elem` wrong) >> putStrLn ": ok"
-  -- putStrLn ss
-
-  let (usage,defargs) = ("Usage: ./14 [STARTAFTERNUM]", ["10000"])
+  let (usage,defargs) = ("Usage: ./14 [STARTAFTERNUM]", ["633601"])
   args <- getArgs
   let [after'] = take 1 $ args ++ drop (length args) defargs
       after = read after'
-  -- when (null args) $ putStrLn usage >> exitSuccess
-  -- let [f] = take 1 $ args ++ drop (length args) defargs
-  -- input <- parse <$> readFile f
 
   hSetBuffering stdout NoBuffering
-  ss <- fmap (concatMap show) $ nextScores after 10 printdots $ parse "37"
+  ss <- fmap (map fromscore . toList) $ nextScores after 10 return $ parse "37"
   putStrLn ss
-
-  -- ss <- fmap (concatMap show) $ nextScores 633601 10 printstats $ parse "37"
-  -- putStrLn ss
-
+    -- 633601: 5115114101
 
 
 -- part 1 world update function
 update1 :: W -> IO W
 update1 w@W{..} = do
   let
-    (cur1,cur2) = (wscores!!welf1, wscores!!welf2)
-    (digit1,digit2) = sum [cur1,cur2] `divMod` 10
-    wscores' = (digit2:) $
-               (if digit1 > 0 then (digit1:) else id) $
-               wscores
-    welf1' = (welf1 + cur1 + 1) `mod` length wscores'
-    welf2' = (welf2 + cur2 + 1) `mod` length wscores'
+    (cur1,cur2) = (wscores `S.index` welf1, wscores `S.index` welf2)
+    (score1,score2) = sum [cur1,cur2] `divMod` 10
+    wscores' = (S.|> score2) $ (if score1 > 0 then (S.|> score1) else id) wscores
+    l = S.length wscores'
+    welf1' = (welf1 + cur1 + 1) `mod` l
+    welf2' = (welf2 + cur2 + 1) `mod` l
   return w{
      wtime   = wtime+1
     ,wscores = wscores'
@@ -220,93 +209,30 @@ update1 w@W{..} = do
     }
 
 -- | after the first m scores in the given World, get the next n scores
-nextScores :: Int -> Int -> (W -> IO W) -> W -> IO [S]
+nextScores :: Int -> Int -> (W -> IO W) -> W -> IO (S.Seq S)
 nextScores afterm nextn display w = do
   (t,w') <- timeItT $ iterateUntilM (recipes (afterm + nextn)) (update1 >=> display) <=< display $ w
   printf "%.3fs to generate %d scores (%.0f scores/s)\n" t afterm (fromIntegral afterm / t)
-  return $ take nextn $ drop afterm $ wscores w'
+  return $ S.take nextn $ S.drop afterm $ wscores w'
 
 -- display functions, these return the unmodified World for easier chaining
 
 printworld :: W -> IO W
 printworld w@W{..} = do
-  printf "%4d (%4d recipes):  %s\n" wtime (length wscores) (concat $ map fmt $ zip [0..] wscores)
+  printf "%4d (%4d recipes):  %s\n" wtime (S.length wscores) (concat $ map fmt $ zip [0..] $ toList wscores)
   return w
   where
     fmt (i,d)
-      | i==welf1 && i==welf2 = "("++show d++"]"
-      | i==welf1             = "("++show d++")"
-      | i==welf2             = "["++show d++"]"
-      | otherwise            = " "++show d++" "
+      | i==welf1 && i==welf2 = "("++[fromscore d]++"]"
+      | i==welf1             = "("++[fromscore d]++")"
+      | i==welf2             = "["++[fromscore d]++"]"
+      | otherwise            = " "++[fromscore d]++" "
 
 printstats w@W{..} = do
-  when (wtime `mod` 1000 == 0) $ printf "%4d (%4d recipes)\n" wtime (length wscores)
+  when (wtime `mod` 1000 == 0) $ printf "%4d (%4d recipes)\n" wtime (S.length wscores)
   return w
 
 printdots w@W{..} = do
   when (wtime `mod` 1000 == 0) (putStr ".")
   return w
 
-
-
-
-{-
-                             <----input----->
-   0 (   8 recipes):  (3)[7] 6  3  3  6  0  1 
-   1 (  10 recipes):   3  7  6  3 (3) 6  0  1  1 [0]
-   2 (  11 recipes):   3  7  6  3  3  6  0  1 (1) 0 [3]
-   3 (  12 recipes):   3  7 [6] 3  3  6  0  1  1  0 (3) 4 
-   4 (  13 recipes):   3 (7) 6  3  3  6  0  1  1 [0] 3  4  9 
-   5 (  14 recipes):   3  7  6  3  3  6  0  1  1 (0)[3] 4  9  7 
-   6 (  15 recipes):   3  7  6  3  3  6  0  1  1  0 (3) 4  9  7 [3]
-   7 (  16 recipes):   3  7 [6] 3  3  6  0  1  1  0  3  4  9  7 (3) 6 
-   8 (  17 recipes):   3 (7) 6  3  3  6  0  1  1 [0] 3  4  9  7  3  6  9 
-   9 (  18 recipes):   3  7  6  3  3  6  0  1  1 (0)[3] 4  9  7  3  6  9  7 
-                                               <---------output?---------->
-1034973697: wrong
-
-   0 (   8 recipes):  (3)[7] 6  3  3  6  0  1 
-   1 (  10 recipes):   3  7  6  3 (3) 6  0  1  1 [0]
-   2 (  11 recipes):   3  7  6  3  3  6  0  1 (1) 0 [3]
-   3 (  12 recipes):   3  7 [6] 3  3  6  0  1  1  0 (3) 4 
-   4 (  13 recipes):   3 (7) 6  3  3  6  0  1  1 [0] 3  4  9 
-   5 (  14 recipes):   3  7  6  3  3  6  0  1  1 (0)[3] 4  9  7 
-   6 (  15 recipes):   3  7  6  3  3  6  0  1  1  0 (3) 4  9  7 [3]
-   7 (  16 recipes):   3  7 [6] 3  3  6  0  1  1  0  3  4  9  7 (3) 6 
-   8 (  17 recipes):   3 (7) 6  3  3  6  0  1  1 [0] 3  4  9  7  3  6  9 
-   9 (  18 recipes):   3  7  6  3  3  6  0  1  1 (0)[3] 4  9  7  3  6  9  7 
-  10 (  19 recipes):   3  7  6  3  3  6  0  1  1  0 (3) 4  9  7 [3] 6  9  7  3 
-  11 (  20 recipes):   3  7  6  3  3  6  0  1  1  0  3  4  9  7 (3) 6  9  7 [3] 6 
-                                                     <---------output?---------->
-3497369736: wrong
-
-   0 (  10 recipes):  (3)[7] 3  7  6  3  3  6  0  1 
-   1 (  12 recipes):   3  7  3  7 (6) 3  3  6  0 [1] 1  0 
-   2 (  13 recipes):   3  7  3  7  6  3  3  6  0  1  1 (0] 7 
-   3 (  14 recipes):   3  7  3  7  6  3  3  6  0  1  1  0 (7] 0 
-   4 (  16 recipes):   3  7  3  7 (6] 3  3  6  0  1  1  0  7  0  1  4 
-   5 (  18 recipes):   3  7  3  7  6  3  3  6  0  1  1 (0] 7  0  1  4  1  2 
-                                 <--mistake
-0110701412: WRONG
-
-   0 (   8 recipes):  (3)[7] 6  3  3  6  0  1 
-   1 (  10 recipes):   3  7  6  3 (3) 6  0  1  1 [0]
-   2 (  11 recipes):   3  7  6  3  3  6  0  1 (1) 0 [3]
-   3 (  12 recipes):   3  7 [6] 3  3  6  0  1  1  0 (3) 4 
-   4 (  13 recipes):   3 (7) 6  3  3  6  0  1  1 [0] 3  4  9 
-   5 (  14 recipes):   3  7  6  3  3  6  0  1  1 (0)[3] 4  9  7 
-   6 (  15 recipes):   3  7  6  3  3  6  0  1  1  0 (3) 4  9  7 [3]
-   7 (  16 recipes):   3  7 [6] 3  3  6  0  1  1  0  3  4  9  7 (3) 6 
-                                         <---------output?---------->
-0110349736: WRONG WRONG WRONG
-
-   1 (  10 recipes):  (3)[7] 1  0  6  3  3  6  0  1 
-   2 (  12 recipes):   3  7  1  0 (6) 3  3  6  0 [1] 1  0 
-   3 (  13 recipes):   3  7  1  0  6  3  3  6  0  1  1 (0] 7 
-   4 (  14 recipes):   3  7  1  0  6  3  3  6  0  1  1  0 (7] 0 
-   5 (  16 recipes):   3  7  1  0 (6] 3  3  6  0  1  1  0  7  0  1  4 
-                                         <---------output?---------->
-
-3601107014: no
-
--}
