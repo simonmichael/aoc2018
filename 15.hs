@@ -423,11 +423,11 @@ defhp = 200
 
 main :: HasCallStack => IO ()
 main = do
-  -- let (usage,defargs) = ("Usage: ./14 [INPUTFILE]", ["14.in"])
-  -- args <- getArgs
+  let (usage,defargs) = ("Usage: ./15 [INPUTFILE]", ["15.in"])
+  args <- getArgs
   -- -- when (null args) $ putStrLn usage >> exitSuccess
-  -- -- let [f] = take 1 $ args ++ drop (length args) defargs
-  -- -- input <- parse <$> readFile f
+  let [f] = take 1 $ args ++ drop (length args) defargs
+  input <- readFile f
 
   -- part 1
   -- (t,w) <- timeItT $ iterateUntilM ((==2).wtime) (update >=> printworld) <=< printworld $ parse t1
@@ -435,7 +435,7 @@ main = do
 
   (t,w) <- timeItT $
      bracket_ initterm resetterm $
-       iterateUntilM (isJust.wend) (update >=> displayworld (-1)) <=< displayworld (-1) $ parse t3
+       iterateUntilM (isJust.wend) (update >=> displayworld (0)) <=< displayworld (0) $ parse input
   printfinalsummary w t
 
   -- part 2
@@ -478,21 +478,22 @@ sortunits = sortOn (\U{upos=(x,y)} -> (y,x))
 sortpoints :: [Pos] -> [Pos]
 sortpoints = sortOn (\(x,y) -> (y,x))
 
+displayhighlightunits w d us = do
+  forM_ us $ \u -> do
+    displaypoints w d (showunit u) [upos u] [SetSwapForegroundBackground True]
+    setSGR [Reset]
+
 updateunit :: HasCallStack => W -> U -> IO U
 updateunit w@W{..} u = do
   -- move
   let targets = filter (u `doestarget`) wunits
       inrange = filter (isinrange u) targets
-  -- displaypoints w 0 (showunit u) [upos u] [
-  --    SetSwapForegroundBackground True
-  --   ] >> setSGR [
-  --    Reset
-  --   ] >> displayinfo w "current unit ^\nall units" (ppShow wunits) >> doinput w
+  displayhighlightunits w 0.1 [u]
   -- displayworld 0 w >> displaypoints w 0 'T' (map upos targets) [] >> displayinfo w "targets" (ppShow $ map upos targets)
   -- displayworld 0 w >> displaypoints w 0 'I' (map upos inrange) [] >> displayinfo w "in range" (ppShow $ map upos inrange)
   --  if not in range, find shortest path to a reachable in-range space
   mpath <- case inrange of
-          _:_ -> return Nothing
+          _:_ -> displayworld 0 w >> return Nothing
           []  ->
             let
               dests         = concatMap (emptyadjacentspaces w . upos) targets
@@ -515,8 +516,9 @@ updateunit w@W{..} u = do
                   -- displayworld 0 w >> displayinfo w "dest" (show dest) >> doinput w
                   -- displayworld 0 w >> displayinfo w "destpaths" (ppShow destpaths) >> doinput w
                   displayworld 0 w
+                    >> displayhighlightunits w 0 [u]
                     >> displaypoints w 0 '.' chosenpath []
-                    >> displaypoints w 0.1 '+' [dest] []
+                    >> displaypoints w 0.3 '+' [dest] []
                     -- >> doinput w
                   displayworld 0 w
                   return $ Just chosenpath
@@ -670,8 +672,8 @@ displayworld delaysecs w@W{..} = do
     ]
   let bg = fmap showtile wmap
       (_,(xmax,ymax)) = A.bounds wmap
-  putStrLn $ " " ++ concatMap show [0..xmax]
-  mapM_ putStrLn [ show y ++ [bg A.! (x,y) | x <- [0..xmax]] | y <- [0..ymax] ]
+  putStrLn $ " " ++ concatMap (take 1.reverse.show) [0..xmax]
+  mapM_ putStrLn [ (take 1.reverse.show) y ++ [bg A.! (x,y) | x <- [0..xmax]] | y <- [0..ymax] ]
 
   setSGR [
      SetColor Background Dull Black
