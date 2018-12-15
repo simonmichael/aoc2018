@@ -447,26 +447,17 @@ main = do
 -- update
 
 update :: HasCallStack => W -> IO W
-update w@W{..} = do
+update w = do
   -- "Regardless of how the unit's turn ends, the next unit in the round takes its turn."
+  w' <- foldM unitupdate w (sortunits $ wunits w)
+  return $
+    w'{ wtime = wtime w + 1
+      } & if (wunits w'==wunits w) then endworld "units have stabilised" else id
 
-  wunits' <- foldM
-    (\us u -> do
-        -- update this unit, seeing units updated earlier in the round
-        u' <- updateunit w{wunits=us} u
-        -- replace this unit in the units list. Each unit has a unique position.
-        let us' = u' : (us \\ [u])
-        return us'
-    )
-    wunits
-    (sortunits wunits)
-
-  let w' = w{
-     wtime   = wtime + 1
-    ,wunits  = wunits'
-    } & if (wunits'==wunits) then endworld "units have stabilised" else id
-
-  return w'
+-- replace a unit in the units list.
+-- The new/updated unit will be inserted at the front of the list.
+worldreplaceunit :: W -> U -> U -> W
+worldreplaceunit w@W{..} oldu newu = w{ wunits = newu : (wunits \\ [oldu]) }
 
 -- trigger the end of the world, and set the reason unless it's already set
 endworld :: String -> W -> W
@@ -483,9 +474,13 @@ displayhighlightunits w d us = do
     displaypoints w d (showunit u) [upos u] [SetSwapForegroundBackground True]
     setSGR [Reset]
 
-updateunit :: HasCallStack => W -> U -> IO U
-updateunit w@W{..} u = do
-  -- move
+-- perform this unit's turn, updating it and possibly other units in the world
+unitupdate :: HasCallStack => W -> U -> IO W
+unitupdate w u = do
+  unitmove w u >>= flip unitattack u
+
+unitmove :: HasCallStack => W -> U -> IO W
+unitmove w@W{..} u = do
   let targets = filter (u `doestarget`) wunits
       inrange = filter (isinrange u) targets
   displayhighlightunits w 0.1 [u]
@@ -523,18 +518,16 @@ updateunit w@W{..} u = do
                   displayworld 0 w
                   return $ Just chosenpath
 
-  --   move towards
-  let u' = case mpath of
-             Just (nextpos:_) -> u{upos=nextpos}
-             Nothing          -> u
+  return $ case mpath of
+             Just (nextpos:_) -> worldreplaceunit w u u{upos=nextpos}
+             Nothing          -> w
 
-  -- attack
-
-  --  if target-adjacent
-  --   select lowest-hp adjacent target
-  --   damage target
-
-  return u'
+unitattack :: HasCallStack => W -> U -> IO W
+unitattack w@W{..} u = do
+  -- if target-adjacent
+  --  select lowest-hp adjacent target
+  --  damage target
+  return w
 
 displayinfo W{..} label s = do
   let (_,(_,ymax)) = A.bounds wmap
