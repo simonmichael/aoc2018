@@ -389,7 +389,8 @@ type X = Int
 type Y = Int
 type Pos = (X,Y)
 type Path = [Pos]
-type Delay = Double
+type Seconds = Double
+type Delay = Seconds  -- a length of time to pause; negative means wait for input
 
 parse :: HasCallStack => String -> W
 parse s =
@@ -435,7 +436,7 @@ main = do
 
   (t,w) <- timeItT $
      bracket_ initterm resetterm $
-       iterateUntilM (isJust.wend) (update >=> displayworld (0)) <=< displayworld (0) $ parse input
+       iterateUntilM (isJust.wend) (update >=> displayworld (0)) <=< displayworld (0) $ parse t3
   printfinalsummary w t
 
   -- part 2
@@ -454,10 +455,15 @@ update w = do
     w'{ wtime = wtime w + 1
       } & if (wunits w'==wunits w) then endworld "units have stabilised" else id
 
--- replace a unit in the units list.
--- The new/updated unit will be inserted at the front of the list.
+-- replace a unit in the world's units list
 worldreplaceunit :: W -> U -> U -> W
-worldreplaceunit w@W{..} oldu newu = w{ wunits = newu : (wunits \\ [oldu]) }
+worldreplaceunit w@W{..} oldu newu =
+  let (before,_:after) = break (==oldu) wunits
+  in  w{ wunits = before ++ [newu] ++ after }
+
+-- remove a unit from the world
+worlddelunit :: W -> U -> W
+worlddelunit w@W{..} u = w{wunits = wunits \\ [u]}
 
 -- trigger the end of the world, and set the reason unless it's already set
 endworld :: String -> W -> W
@@ -469,21 +475,20 @@ sortunits = sortOn (\U{upos=(x,y)} -> (y,x))
 sortpoints :: [Pos] -> [Pos]
 sortpoints = sortOn (\(x,y) -> (y,x))
 
-displayhighlightunits w d us = do
-  forM_ us $ \u -> do
-    displaypoints w d (showunit u) [upos u] [SetSwapForegroundBackground True]
-    setSGR [Reset]
-
 -- perform this unit's turn, updating it and possibly other units in the world
 unitupdate :: HasCallStack => W -> U -> IO W
 unitupdate w u = do
-  unitmove w u >>= flip unitattack u
+  w' <- unitmove w u
+  w'' <- unitattack w' u
+  return w''
+
+highlightdelay = 0.05
 
 unitmove :: HasCallStack => W -> U -> IO W
 unitmove w@W{..} u = do
   let targets = filter (u `doestarget`) wunits
       inrange = filter (isinrange u) targets
-  displayhighlightunits w 0.1 [u]
+  displayhighlightunits w highlightdelay [u]
   -- displayworld 0 w >> displaypoints w 0 'T' (map upos targets) [] >> displayinfo w "targets" (ppShow $ map upos targets)
   -- displayworld 0 w >> displaypoints w 0 'I' (map upos inrange) [] >> displayinfo w "in range" (ppShow $ map upos inrange)
   --  if not in range, find shortest path to a reachable in-range space
@@ -513,7 +518,7 @@ unitmove w@W{..} u = do
                   displayworld 0 w
                     >> displayhighlightunits w 0 [u]
                     >> displaypoints w 0 '.' chosenpath []
-                    >> displaypoints w 0.3 '+' [dest] []
+                    >> displaypoints w highlightdelay '+' [dest] []
                     -- >> doinput w
                   displayworld 0 w
                   return $ Just chosenpath
@@ -521,23 +526,6 @@ unitmove w@W{..} u = do
   return $ case mpath of
              Just (nextpos:_) -> worldreplaceunit w u u{upos=nextpos}
              Nothing          -> w
-
-unitattack :: HasCallStack => W -> U -> IO W
-unitattack w@W{..} u = do
-  -- if target-adjacent
-  --  select lowest-hp adjacent target
-  --  damage target
-  return w
-
-displayinfo W{..} label s = do
-  let (_,(_,ymax)) = A.bounds wmap
-  setCursorPosition (ymax+3) 0
-  putStrLn $ label ++ ":\n" ++ s
-
-ttrace :: Show a => W -> String -> a -> a
-ttrace w msg x =
-  unsafePerformIO (displayinfo w msg (ppShow x)) `seq`
-  x
 
 -- the astar lib returns only one shortest path, so run it from each
 -- adjacent position and if there are several with the shortest length
@@ -589,6 +577,26 @@ isempty W{..} (x,y) =
      wmap A.! (x,y) == Floor
   && not (any (\U{upos=(ux,uy)} -> ux==x && uy==y) wunits)
 
+unitattack :: HasCallStack => W -> U -> IO W
+unitattack w@W{..} u = do
+  let inrange = filter (isinrange u) $ filter (doestarget u) wunits
+  case inrange of
+    [] -> return w
+    us -> do
+      let target = head $ sortunits $ head $ groupBy ((==)`on`uhp) $ sortOn uhp us
+      displayhighlightunits w 0 [u]
+      displaypoints w highlightdelay '*' [upos target] []
+      unitdamage w target 3
+
+-- deal this many hit points of damage to this unit, possibly killing it
+unitdamage :: W -> U -> Int -> IO W
+unitdamage w@W{..} u damage = do
+  let
+    u' = u{uhp=uhp u - damage}
+    w' | uhp u' > 0 = worldreplaceunit w u u'
+       | otherwise  = worlddelunit w u
+  return w'
+
 -- display. these return the unmodified World for easier chaining
 
 ux = fst . upos
@@ -614,8 +622,8 @@ printdots w@W{..} = do
 
 printfinalsummary :: W -> Double -> IO ()
 printfinalsummary W{..} t = do
-  printf "\n%s\n" (fromMaybe "" wend)
-  printf "%.3fs to simulate %d ticks (%.0f ticks/s)\n" t wtime (fromIntegral wtime / t)
+  printf "\n%s after %d ticks\n" (fromMaybe "" wend) wtime
+  -- printf "%.3fs to simulate %d ticks (%.0f ticks/s)\n" t wtime (fromIntegral wtime / t)
   -- doinput w
 
 initterm = do
@@ -631,20 +639,10 @@ resetterm = do
 toscreenx = (+1)
 toscreeny = (+2)
 
--- display a character with a style at some positions, and pause
-displaypoints :: W -> Delay -> Char -> [Pos] -> [SGR] -> IO W
-displaypoints w d c ps style = do
-  setSGR style
-  forM_ ps $ \(x,y) -> do
-    setCursorPosition (toscreeny y) (toscreenx x)
-    putChar c
-  delay d
-  return w
-
 -- display in an ansi terminal and pause for the given number of seconds
 -- (or if negative, wait and handle keypress)
 displayworld :: HasCallStack => Delay -> W -> IO W
-displayworld delaysecs w@W{..} = do
+displayworld d w@W{..} = do
   Just (Window{..}) <- size
 
   setSGR [
@@ -666,7 +664,11 @@ displayworld delaysecs w@W{..} = do
   let bg = fmap showtile wmap
       (_,(xmax,ymax)) = A.bounds wmap
   putStrLn $ " " ++ concatMap (take 1.reverse.show) [0..xmax]
-  mapM_ putStrLn [ (take 1.reverse.show) y ++ [bg A.! (x,y) | x <- [0..xmax]] | y <- [0..ymax] ]
+  let maprows = [ (take 1.reverse.show) y ++ [bg A.! (x,y) | x <- [0..xmax]] | y <- [0..ymax] ]
+      unitstats = [printf "%s%d,%d:%3d" [showunit u] (ux u) (uy u) (uhp u) | u <- wunits]
+      h = max (length maprows) (length unitstats)
+  forM_ (take h $ zip (maprows++repeat "") (unitstats++repeat "")) $
+    \(mr,us) -> putStrLn $ mr ++ "    " ++ us
 
   setSGR [
      SetColor Background Dull Black
@@ -681,20 +683,26 @@ displayworld delaysecs w@W{..} = do
   -- position cursor for debug printing
   setCursorPosition (ymax+3) 0
 
-  if delaysecs >=0
-  then delay delaysecs
-  else void $ doinput w
+  pause w d
   return w
 
+-- wait for n seconds, or if n is negative, prompt for and handle a keypress
+pause :: W -> Delay -> IO ()
+pause w d = if d >=0 then delay d else void $ doinput w
+
+-- wait for n seconds
+delay :: Seconds -> IO ()
 delay secs = threadDelay $ round $ secs * 1e6
 
+-- prompt for and handle a keypress. Does not change the world.
+doinput :: W -> IO ()
 doinput w@W{..} = do
   displayprompt
   c <- getChar
   case c of
     'q' -> exitSuccess
-    'i' -> displayinfo w "units" (ppShow wunits) >> doinput w
-    _   -> return w
+    -- 'i' -> displayinfo w (-1) "units" (ppShow wunits)
+    _   -> return ()
   
 displayprompt = do
   Just (Window{..}) <- size
@@ -705,5 +713,32 @@ displayprompt = do
     ,SetSwapForegroundBackground False
     ]
   setCursorPosition (height-4) 0
-  putStrLn $ "\n\nq: quit,  i: info,  any other key: advance"
+  putStrLn $ "\n\nq: quit,  any other key: advance"
+
+-- display a character with a style at some positions, and pause
+displaypoints :: W -> Delay -> Char -> [Pos] -> [SGR] -> IO W
+displaypoints w d c ps style = do
+  setSGR style
+  forM_ ps $ \(x,y) -> do
+    setCursorPosition (toscreeny y) (toscreenx x)
+    putChar c
+  pause w d
+  return w
+
+displayhighlightunits w d us = do
+  forM_ us $ \u -> do
+    displaypoints w d (showunit u) [upos u] [SetSwapForegroundBackground True]
+    setSGR [Reset]
+
+displayinfo :: W -> Delay -> String -> String -> IO ()
+displayinfo w@W{..} d label s = do
+  let (_,(_,ymax)) = A.bounds wmap
+  setCursorPosition (ymax+3) 0
+  putStrLn $ label ++ ":\n" ++ s
+  pause w d
+
+ttrace :: Show a => W -> String -> a -> a
+ttrace w msg x =
+  unsafePerformIO (displayinfo w 0 msg (ppShow x)) `seq`
+  x
 
