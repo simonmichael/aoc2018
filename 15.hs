@@ -200,6 +200,13 @@ t3 = [here|
 -- ..EG.  2  -->  ..E..     
 -- ..G..  2       ..G..  2  
 -- ...G.  1       ...G.  1
+t4 = [here|
+G....
+..G..
+..EG.
+..G..
+...G.
+|]
 
 -- Initially:
 -- #######   
@@ -209,6 +216,15 @@ t3 = [here|
 -- #..G#E#   G(200), E(200)
 -- #.....#   
 -- #######   
+t5 = [here|
+#######
+#.G...#
+#...EG#
+#.#.#G#
+#..G#E#
+#.....#
+#######
+|]
 
 -- After 1 round:
 -- #######   
@@ -419,6 +435,9 @@ showunit :: HasCallStack => U -> Char
 showunit U{..} = head $ show utype
 
 defhp = 200
+defdamage = 3
+highlightdelay = 1
+
 
 -- main
 
@@ -436,7 +455,7 @@ main = do
 
   (t,w) <- timeItT $
      bracket_ initterm resetterm $
-       iterateUntilM (isJust.wend) (update >=> displayworld (0)) <=< displayworld (0) $ parse t3
+       iterateUntilM (isJust.wend) (update >=> displayworld (-1)) <=< displayworld (-1) $ parse t5
   printfinalsummary w t
 
   -- part 2
@@ -481,8 +500,6 @@ unitupdate w u = do
   w' <- unitmove w u
   w'' <- unitattack w' u
   return w''
-
-highlightdelay = 0.05
 
 unitmove :: HasCallStack => W -> U -> IO W
 unitmove w@W{..} u = do
@@ -586,7 +603,7 @@ unitattack w@W{..} u = do
       let target = head $ sortunits $ head $ groupBy ((==)`on`uhp) $ sortOn uhp us
       displayhighlightunits w 0 [u]
       displaypoints w highlightdelay '*' [upos target] []
-      unitdamage w target 3
+      unitdamage w target defdamage
 
 -- deal this many hit points of damage to this unit, possibly killing it
 unitdamage :: W -> U -> Int -> IO W
@@ -664,10 +681,13 @@ displayworld d w@W{..} = do
   let bg = fmap showtile wmap
       (_,(xmax,ymax)) = A.bounds wmap
   putStrLn $ " " ++ concatMap (take 1.reverse.show) [0..xmax]
-  let maprows = [ (take 1.reverse.show) y ++ [bg A.! (x,y) | x <- [0..xmax]] | y <- [0..ymax] ]
-      unitstats = [printf "%s%d,%d:%3d" [showunit u] (ux u) (uy u) (uhp u) | u <- wunits]
-      h = max (length maprows) (length unitstats)
-  forM_ (take h $ zip (maprows++repeat "") (unitstats++repeat "")) $
+  let maprows   = [ lastdigit y : [bg A.! (x,y) | x <- [0..xmax]]
+                    | y <- [0..ymax] ]
+      unitstats = [ intercalate ", " $ map showunithp $ sortOn ux $ filter ((==y).uy) wunits
+                    | y <- [0..ymax] ]
+  forM_ (take (max (length maprows) (length unitstats)) $ zip
+          (maprows++repeat (replicate (xmax+1) ' '))
+          (unitstats++repeat "")) $
     \(mr,us) -> putStrLn $ mr ++ "    " ++ us
 
   setSGR [
@@ -685,6 +705,10 @@ displayworld d w@W{..} = do
 
   pause w d
   return w
+
+showunithp u = printf "%c(%d)" (showunit u) (uhp u)
+
+lastdigit = last.show
 
 -- wait for n seconds, or if n is negative, prompt for and handle a keypress
 pause :: W -> Delay -> IO ()
