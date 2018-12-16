@@ -322,6 +322,15 @@ t5 = [here|
 -- #...#E#       #E..#E#   E(200), E(200)
 -- #...E.#       #.....#
 -- #######       #######
+t6 = [here|
+#######
+#G..#E#
+#E#E.E#
+#G.##.#
+#...#E#
+#...E.#
+#######
+|]
 
 -- Combat ends after 37 full rounds
 -- Elves win with 982 total hit points left
@@ -334,6 +343,15 @@ t5 = [here|
 -- #G..#.#       #.E.#.#   E(200)
 -- #..E#.#       #...#.#   
 -- #######       #######   
+t7 = [here|
+#######
+#E..EG#
+#.#G.E#
+#E.##E#
+#G..#.#
+#..E#.#
+#######
+|]
 
 -- Combat ends after 46 full rounds
 -- Elves win with 859 total hit points left
@@ -346,6 +364,15 @@ t5 = [here|
 -- #G..#.#       #...#G#   G(95)
 -- #...E.#       #...G.#   G(200)
 -- #######       #######   
+t8 = [here|
+#######
+#E.G#.#
+#.#G..#
+#G.#.G#
+#G..#.#
+#...E.#
+#######
+|]
 
 -- Combat ends after 35 full rounds
 -- Goblins win with 793 total hit points left
@@ -358,6 +385,15 @@ t5 = [here|
 -- #E#G#G#       #.#.#.#   
 -- #...#G#       #G.G#G#   G(98), G(38), G(200)
 -- #######       #######   
+t9 = [here|
+#######
+#.E...#
+#.#..G#
+#.###.#
+#E#G#G#
+#...#G#
+#######
+|]
 
 -- Combat ends after 54 full rounds
 -- Goblins win with 536 total hit points left
@@ -372,6 +408,17 @@ t5 = [here|
 -- #.G...G.#       #.......#   
 -- #.....G.#       #.......#   
 -- #########       #########   
+t10 = [here|
+#########
+#G......#
+#.E.#...#
+#..##..G#
+#...##..#
+#...#...#
+#.G...G.#
+#.....G.#
+#########
+|]
 
 -- Combat ends after 20 full rounds
 -- Goblins win with 937 total hit points left
@@ -445,7 +492,7 @@ sortpoints = sortOn (\(x,y) -> (y,x))
 
 defhp = 200
 defdamage = 3
-defdelay = 0.1
+defdelay = 0
 
 -- replace a unit in the world's units list
 worldreplaceunit :: W -> U -> U -> W
@@ -476,7 +523,7 @@ main = do
   (t,w) <- timeItT $ bracket_ initterm resetterm $
     iterateUntilM (isJust.wend)
       (update >=> displayworld (-1)) <=< displayworld (-1)
-      $ parse t5
+      $ parse t6
   printsummary w t
 
   -- part 2
@@ -502,45 +549,49 @@ unitupdate w u = do
 unitmove :: HasCallStack => W -> U -> IO (W, U)
 unitmove w@W{..} u = do
   let targets = filter (u `doestarget`) wunits
-      inrange = filter (isinrange u) targets
-  displayhighlightunits w defdelay [u]
-  -- displayworld 0 w >> displaypoints w 0 'T' (map upos targets) [] >> displayinfo w "targets" (ppShow $ map upos targets)
-  -- displayworld 0 w >> displaypoints w 0 'I' (map upos inrange) [] >> displayinfo w "in range" (ppShow $ map upos inrange)
-  (w',u') <- case inrange of
-            _:_ -> return (w,u)
-            []  ->
-              --  find shortest path (in read order) to a reachable in-range space
-              let
-                dests         = concatMap (emptyadjacentspaces w . upos) targets
-                shortestpaths = catMaybes $ map (astarshortestpathreadorder w (upos u)) dests
-              in
-                case shortestpaths of
-                  []    -> return (w,u)
-                  paths -> do
-                    let reachable             = nub $ sortpoints $ map last paths
-                        shortestshortestpaths = head $ groupBy ((==)`on`length) $ sortOn length paths
-                        nearestdests          = nub $ sort $ map last shortestshortestpaths
-                        dest                  = head $ sortpoints nearestdests
-                        destpaths             = filter ((==dest).last) shortestshortestpaths
-                        chosenpath            = head $ sortOn (\((x,y):_) -> (y,x)) $ destpaths
-                        nextpos:_             = chosenpath
-                    -- displayworld 0 w >> displaypoints w 0 '?' dests        [] >> displayinfo w "dests" (ppShow dests)
-                    -- displayworld 0 w >> displaypoints w 0 '@' reachable    [] >> displayinfo w "reachable" (ppShow reachable)
-                    -- displayinfo w "all dests' shortest paths" (ppShow shortestpaths)
-                    -- displayworld 0 w >> displayinfo w "shortestshortestpaths" (ppShow shortestshortestpaths)
-                    -- displayworld 0 w >> displaypoints w 0 '!' nearestdests [] >> displayinfo w "nearestdests" (ppShow nearestdests)
-                    -- displayworld 0 w >> displayinfo w "dest" (show dest)
-                    -- displayworld 0 w >> displayinfo w "destpaths" (ppShow destpaths)
-                    displayworld 0 w
-                      >> displayhighlightunits w 0 [u]
-                      >> displaypoints w 0 '.' chosenpath []
-                      >> displaypoints w defdelay '+' [dest] []
-                    -- move along that path
-                    let u' = u{upos=nextpos}
-                    return (worldreplaceunit w u u', u')
+  if null targets
+  then do
+    return (endworld "no targets remaining" w, u)
+  else do
+    let inrange = filter (isinrange u) targets
+    displayhighlightunits w defdelay [u]
+    -- displayworld 0 w >> displaypoints w 0 'T' (map upos targets) [] >> displayinfo w "targets" (ppShow $ map upos targets)
+    -- displayworld 0 w >> displaypoints w 0 'I' (map upos inrange) [] >> displayinfo w "in range" (ppShow $ map upos inrange)
+    (w',u') <- case inrange of
+              _:_ -> return (w,u)
+              []  ->
+                --  find shortest path (in read order) to a reachable in-range space
+                let
+                  dests         = concatMap (emptyadjacentspaces w . upos) targets
+                  shortestpaths = catMaybes $ map (astarshortestpathreadorder w (upos u)) dests
+                in
+                  case shortestpaths of
+                    []    -> return (w,u)
+                    paths -> do
+                      let reachable             = nub $ sortpoints $ map last paths
+                          shortestshortestpaths = head $ groupBy ((==)`on`length) $ sortOn length paths
+                          nearestdests          = nub $ sort $ map last shortestshortestpaths
+                          dest                  = head $ sortpoints nearestdests
+                          destpaths             = filter ((==dest).last) shortestshortestpaths
+                          chosenpath            = head $ sortOn (\((x,y):_) -> (y,x)) $ destpaths
+                          nextpos:_             = chosenpath
+                      -- displayworld 0 w >> displaypoints w 0 '?' dests        [] >> displayinfo w "dests" (ppShow dests)
+                      -- displayworld 0 w >> displaypoints w 0 '@' reachable    [] >> displayinfo w "reachable" (ppShow reachable)
+                      -- displayinfo w "all dests' shortest paths" (ppShow shortestpaths)
+                      -- displayworld 0 w >> displayinfo w "shortestshortestpaths" (ppShow shortestshortestpaths)
+                      -- displayworld 0 w >> displaypoints w 0 '!' nearestdests [] >> displayinfo w "nearestdests" (ppShow nearestdests)
+                      -- displayworld 0 w >> displayinfo w "dest" (show dest)
+                      -- displayworld 0 w >> displayinfo w "destpaths" (ppShow destpaths)
+                      displayworld 0 w
+                        >> displayhighlightunits w 0 [u]
+                        >> displaypoints w 0 '.' chosenpath []
+                        >> displaypoints w defdelay '+' [dest] []
+                      -- move along that path
+                      let u' = u{upos=nextpos}
+                      return (worldreplaceunit w u u', u')
 
-  displayworld defdelay w'
-  return (w',u')
+    displayworld defdelay w'
+    return (w',u')
 
 -- the astar lib returns only one shortest path, so run it from each
 -- adjacent position and if there are several with the shortest length
@@ -635,9 +686,16 @@ printdots w@W{..} = do
 
 printsummary :: W -> Double -> IO ()
 printsummary W{..} t = do
-  printf "\n%s after %d ticks\n" (fromMaybe "" wend) wtime
+  let (_,(_,ymax)) = A.bounds wmap
+  setCursorPosition (ymax+3) 0
+  printf "\n%s in %dth tick\n" (fromMaybe "" wend) wtime
   -- printf "%.3fs to simulate %d ticks (%.0f ticks/s)\n" t wtime (fromIntegral wtime / t)
-  -- doinput w
+  let ty = showunit (head wunits)
+      hp = sum $ map uhp wunits
+      t  = wtime - 1
+  when (all (==ty) $ map showunit wunits) $ do
+    printf "%s won with %d total hit points left after %d full rounds\nOutcome: %d x %d = %d\n"
+      (if ty=='G' then "Goblins" else "Elves") hp t t hp (t * hp)
 
 initterm = do
   hideCursor
