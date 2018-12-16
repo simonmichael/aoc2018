@@ -434,45 +434,18 @@ parseunit _ _ _   = Nothing
 showunit :: HasCallStack => U -> Char
 showunit U{..} = head $ show utype
 
+ux = fst . upos
+uy = snd . upos
+
+sortunits :: [U] -> [U]
+sortunits = sortOn (\U{upos=(x,y)} -> (y,x))
+
+sortpoints :: [Pos] -> [Pos]
+sortpoints = sortOn (\(x,y) -> (y,x))
+
 defhp = 200
 defdamage = 3
-highlightdelay = 1
-
-
--- main
-
-main :: HasCallStack => IO ()
-main = do
-  let (usage,defargs) = ("Usage: ./15 [INPUTFILE]", ["15.in"])
-  args <- getArgs
-  -- -- when (null args) $ putStrLn usage >> exitSuccess
-  let [f] = take 1 $ args ++ drop (length args) defargs
-  input <- readFile f
-
-  -- part 1
-  -- (t,w) <- timeItT $ iterateUntilM ((==2).wtime) (update >=> printworld) <=< printworld $ parse t1
-  -- printfinaltime w t
-
-  (t,w) <- timeItT $
-     bracket_ initterm resetterm $
-       iterateUntilM (isJust.wend) (update >=> displayworld (-1)) <=< displayworld (-1) $ parse t5
-  printfinalsummary w t
-
-  -- part 2
-  -- (t,w) <- timeItT $ iterateUntilM ((==1000).wtime) (update2 >=> printworld) $ parse t1
-  -- printf "%.3fs to simulate %d ticks (%.0f ticks/s)\n" t (wtime w) (fromIntegral (wtime w) / t)
-  -- let x = wx w
-  -- putStr x >> assert_ (x == 123) >> putStrLn ": ok"
-
--- update
-
-update :: HasCallStack => W -> IO W
-update w = do
-  -- "Regardless of how the unit's turn ends, the next unit in the round takes its turn."
-  w' <- foldM unitupdate w (sortunits $ wunits w)
-  return $
-    w'{ wtime = wtime w + 1
-      } & if (wunits w'==wunits w) then endworld "units have stabilised" else id
+defdelay = 0.1
 
 -- replace a unit in the world's units list
 worldreplaceunit :: W -> U -> U -> W
@@ -488,61 +461,86 @@ worlddelunit w@W{..} u = w{wunits = wunits \\ [u]}
 endworld :: String -> W -> W
 endworld reason w@W{..} = w{wend=maybe (Just reason) Just wend}
 
-sortunits :: [U] -> [U]
-sortunits = sortOn (\U{upos=(x,y)} -> (y,x))
 
-sortpoints :: [Pos] -> [Pos]
-sortpoints = sortOn (\(x,y) -> (y,x))
+-- main
+
+main :: HasCallStack => IO ()
+main = do
+  let (usage,defargs) = ("Usage: ./15 [INPUTFILE]", ["15.in"])
+  args <- getArgs
+  -- -- when (null args) $ putStrLn usage >> exitSuccess
+  let [f] = take 1 $ args ++ drop (length args) defargs
+  input <- readFile f
+
+  -- part 1
+  (t,w) <- timeItT $ bracket_ initterm resetterm $
+    iterateUntilM (isJust.wend)
+      (update >=> displayworld (-1)) <=< displayworld (-1)
+      $ parse t5
+  printsummary w t
+
+  -- part 2
+
+-- update
+
+update :: HasCallStack => W -> IO W
+update w = do
+  -- "Regardless of how the unit's turn ends, the next unit in the round takes its turn."
+  w' <- foldM unitupdate w (sortunits $ wunits w)
+  return $
+    w'{ wtime = wtime w + 1
+      } & if (wunits w'==wunits w) then endworld "units have stabilised" else id
 
 -- perform this unit's turn, updating it and possibly other units in the world
 unitupdate :: HasCallStack => W -> U -> IO W
 unitupdate w u = do
-  w' <- unitmove w u
-  w'' <- unitattack w' u
+  (w',u') <- unitmove w u
+  w'' <- unitattack w' u'
   return w''
 
-unitmove :: HasCallStack => W -> U -> IO W
+-- move this unit one step, if it can, and return both the updated world and unit
+unitmove :: HasCallStack => W -> U -> IO (W, U)
 unitmove w@W{..} u = do
   let targets = filter (u `doestarget`) wunits
       inrange = filter (isinrange u) targets
-  displayhighlightunits w highlightdelay [u]
+  displayhighlightunits w defdelay [u]
   -- displayworld 0 w >> displaypoints w 0 'T' (map upos targets) [] >> displayinfo w "targets" (ppShow $ map upos targets)
   -- displayworld 0 w >> displaypoints w 0 'I' (map upos inrange) [] >> displayinfo w "in range" (ppShow $ map upos inrange)
-  --  if not in range, find shortest path to a reachable in-range space
-  mpath <- case inrange of
-          _:_ -> displayworld 0 w >> return Nothing
-          []  ->
-            let
-              dests         = concatMap (emptyadjacentspaces w . upos) targets
-              shortestpaths = catMaybes $ map (astarshortestpathreadorder w (upos u)) dests
-            in
-              case shortestpaths of
-                []    -> return Nothing
-                paths -> do
-                  let reachable             = nub $ sortpoints $ map last paths
-                      shortestshortestpaths = head $ groupBy ((==)`on`length) $ sortOn length paths
-                      nearestdests          = nub $ sort $ map last shortestshortestpaths
-                      dest                  = head $ sortpoints nearestdests
-                      destpaths             = filter ((==dest).last) shortestshortestpaths
-                      chosenpath            = head $ sortOn (\((x,y):_) -> (y,x)) $ destpaths
-                  -- displayworld 0 w >> displaypoints w 0 '?' dests        [] >> displayinfo w "dests" (ppShow dests) >> doinput w
-                  -- displayworld 0 w >> displaypoints w 0 '@' reachable    [] >> displayinfo w "reachable" (ppShow reachable) >> doinput w
-                  -- displayinfo w "all dests' shortest paths" (ppShow shortestpaths) >> doinput w
-                  -- displayworld 0 w >> displayinfo w "shortestshortestpaths" (ppShow shortestshortestpaths) >> doinput w
-                  -- displayworld 0 w >> displaypoints w 0 '!' nearestdests [] >> displayinfo w "nearestdests" (ppShow nearestdests) >> doinput w
-                  -- displayworld 0 w >> displayinfo w "dest" (show dest) >> doinput w
-                  -- displayworld 0 w >> displayinfo w "destpaths" (ppShow destpaths) >> doinput w
-                  displayworld 0 w
-                    >> displayhighlightunits w 0 [u]
-                    >> displaypoints w 0 '.' chosenpath []
-                    >> displaypoints w highlightdelay '+' [dest] []
-                    -- >> doinput w
-                  displayworld 0 w
-                  return $ Just chosenpath
+  (w',u') <- case inrange of
+            _:_ -> return (w,u)
+            []  ->
+              --  find shortest path (in read order) to a reachable in-range space
+              let
+                dests         = concatMap (emptyadjacentspaces w . upos) targets
+                shortestpaths = catMaybes $ map (astarshortestpathreadorder w (upos u)) dests
+              in
+                case shortestpaths of
+                  []    -> return (w,u)
+                  paths -> do
+                    let reachable             = nub $ sortpoints $ map last paths
+                        shortestshortestpaths = head $ groupBy ((==)`on`length) $ sortOn length paths
+                        nearestdests          = nub $ sort $ map last shortestshortestpaths
+                        dest                  = head $ sortpoints nearestdests
+                        destpaths             = filter ((==dest).last) shortestshortestpaths
+                        chosenpath            = head $ sortOn (\((x,y):_) -> (y,x)) $ destpaths
+                        nextpos:_             = chosenpath
+                    -- displayworld 0 w >> displaypoints w 0 '?' dests        [] >> displayinfo w "dests" (ppShow dests)
+                    -- displayworld 0 w >> displaypoints w 0 '@' reachable    [] >> displayinfo w "reachable" (ppShow reachable)
+                    -- displayinfo w "all dests' shortest paths" (ppShow shortestpaths)
+                    -- displayworld 0 w >> displayinfo w "shortestshortestpaths" (ppShow shortestshortestpaths)
+                    -- displayworld 0 w >> displaypoints w 0 '!' nearestdests [] >> displayinfo w "nearestdests" (ppShow nearestdests)
+                    -- displayworld 0 w >> displayinfo w "dest" (show dest)
+                    -- displayworld 0 w >> displayinfo w "destpaths" (ppShow destpaths)
+                    displayworld 0 w
+                      >> displayhighlightunits w 0 [u]
+                      >> displaypoints w 0 '.' chosenpath []
+                      >> displaypoints w defdelay '+' [dest] []
+                    -- move along that path
+                    let u' = u{upos=nextpos}
+                    return (worldreplaceunit w u u', u')
 
-  return $ case mpath of
-             Just (nextpos:_) -> worldreplaceunit w u u{upos=nextpos}
-             Nothing          -> w
+  displayworld defdelay w'
+  return (w',u')
 
 -- the astar lib returns only one shortest path, so run it from each
 -- adjacent position and if there are several with the shortest length
@@ -600,9 +598,10 @@ unitattack w@W{..} u = do
   case inrange of
     [] -> return w
     us -> do
+      -- target the lowest-HP in-range unit in read order
       let target = head $ sortunits $ head $ groupBy ((==)`on`uhp) $ sortOn uhp us
       displayhighlightunits w 0 [u]
-      displaypoints w highlightdelay '*' [upos target] []
+      displaypoints w defdelay '*' [upos target] []
       unitdamage w target defdamage
 
 -- deal this many hit points of damage to this unit, possibly killing it
@@ -615,9 +614,6 @@ unitdamage w@W{..} u damage = do
   return w'
 
 -- display. these return the unmodified World for easier chaining
-
-ux = fst . upos
-uy = snd . upos
 
 printworld :: W -> IO W
 printworld w@W{..} = do
@@ -637,8 +633,8 @@ printdots w@W{..} = do
   when (wtime `mod` 1000 == 0) (putStr ".")
   return w
 
-printfinalsummary :: W -> Double -> IO ()
-printfinalsummary W{..} t = do
+printsummary :: W -> Double -> IO ()
+printsummary W{..} t = do
   printf "\n%s after %d ticks\n" (fromMaybe "" wend) wtime
   -- printf "%.3fs to simulate %d ticks (%.0f ticks/s)\n" t wtime (fromIntegral wtime / t)
   -- doinput w
@@ -673,8 +669,8 @@ displayworld d w@W{..} = do
   putStrLn $ "t " ++ show wtime ++ "  "
 
   setSGR [
-     SetColor Foreground Dull Red
-    ,SetColor Background Dull Black
+     SetColor Background Dull Black
+    ,SetColor Foreground Dull Red
     ,SetConsoleIntensity FaintIntensity
     ,SetSwapForegroundBackground False
     ]
@@ -731,8 +727,8 @@ doinput w@W{..} = do
 displayprompt = do
   Just (Window{..}) <- size
   setSGR [
-     SetColor Foreground Dull White
-    ,SetColor Background Dull Black
+     SetColor Background Dull Black
+    ,SetColor Foreground Dull White
     ,SetConsoleIntensity FaintIntensity
     ,SetSwapForegroundBackground False
     ]
